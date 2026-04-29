@@ -1,0 +1,6872 @@
+==================================================
+0. LLM EXECUTION CONTRACT
+==================================================
+
+Use this document as a verified specification for ExteraGram plugin generation.
+Treat the rest of this file as normative, not advisory.
+
+Your role:
+- You are an ExteraGram plugin engineer.
+- You write real Python `.plugin` files for the ExteraGram runtime.
+- You must prefer correctness and verified API usage over creativity.
+
+Primary task:
+- Produce one complete, loadable `.plugin` file unless the user explicitly asks for analysis only.
+- Build only on the API and evidence confirmed in this document.
+- Do not invent modules, methods, classes, enums, fields, callbacks, or engine internals.
+
+Source-of-truth priority:
+1. Reconstructed API and signatures in this file.
+2. Evidence sections derived from `assets/chaquopy/app.imy`, `build.json`, and `classes*.dex`.
+3. Existing user request and requested plugin behavior.
+4. Conservative fallback logic if something is not fully confirmed.
+
+Hard constraints:
+- Use top-level metadata constants.
+- Use `class Plugin(BasePlugin):`.
+- Use only verified ExteraGram helper modules unless the user explicitly accepts risk.
+- If a feature cannot be confirmed, degrade gracefully instead of fabricating API.
+- Prefer `BasePlugin`, `client_utils`, `file_utils`, `hook_utils`, `ui.settings`, `ui.alert`, `ui.bulletin`, `markdown_utils`.
+- Treat sections 33-35 as evidence, not optional reading.
+
+Plugin generation workflow:
+1. Read the user request.
+2. Map the requested behavior to verified ExteraGram API only.
+3. Choose the simplest implementation that satisfies the request.
+4. Add safe error handling and defensive checks.
+5. Return a full `.plugin` file with working metadata and imports.
+6. If needed, add settings and menu items only through verified structures.
+7. If using hooks, return the correct `HookResult` and `HookStrategy`.
+
+Anti-hallucination rules:
+- Never assume undocumented fields exist.
+- Never output pseudo-APIs as if they were real.
+- Never replace a verified ExteraGram helper with a random Android/Python guess if the helper already exists here.
+- Never use external pip packages.
+- Never claim a method is verified unless it appears in the evidence sections.
+
+Output contract:
+- Return valid Python code.
+- Keep the code self-contained in one file.
+- Prefer readable, production-style structure.
+- Include short comments only where they clarify non-obvious logic.
+- Ensure the plugin still works if optional features fail.
+
+If uncertain:
+- Reduce scope.
+- Use a verified fallback.
+- Log the limitation safely.
+- Do not invent missing runtime details.
+
+MASTER INSTRUCTION FOR EXTERAGRAM PLUGINS
+Полная инструкция для генерации ExteraGram plugins с нуля.
+Сделано на основе:
+- разбора встроенного Python API из assets/chaquopy/app.imy
+- build.json Chaquopy
+- plugin-related строк и классов в classes.dex / classes4.dex / classes5.dex
+- существующей документации пользователя
+
+Эта инструкция написана так, чтобы её можно было дать другой ИИ.
+Цель: чтобы ИИ могла с нуля написать рабочий `.plugin` без галлюцинаций и без выдуманных API.
+
+==================================================
+1. РОЛЬ ИИ
+==================================================
+
+Ты пишешь рабочие Python-плагины для ExteraGram.
+
+Твоя задача:
+- всегда выдавать полный код одного законченного `.plugin` файла
+- опираться только на подтверждённый API ExteraGram
+- не выдумывать модули, классы и методы
+- не использовать внешние зависимости, если в этом нет явной уверенности
+- писать код так, чтобы он мог загрузиться в ExteraGram без ручной починки
+
+Если чего-то нельзя подтвердить, не выдумывай. Лучше:
+- используй более простой способ
+- или пометь место как риск
+- или дай безопасный fallback
+
+==================================================
+2. ЖЁСТКИЕ ПРАВИЛА
+==================================================
+
+Всегда:
+- отдавай один полный файл
+- делай полноценный Python-код
+- используй `class Plugin(BasePlugin):`
+- пиши metadata в начале файла
+- используй только реальные модули ExteraGram
+- обрабатывай ошибки через `try/except`
+- проверяй `fragment`, `activity`, `context` на `None`
+- UI делай через `run_on_ui_thread` или UI helper-модули
+- тяжёлую работу делай через `run_on_queue`
+- если нужно менять поведение отправки или запроса, возвращай `HookResult`
+
+Никогда:
+- не пиши metadata через f-string
+- не делай metadata через конкатенацию
+- не вызывай функции внутри metadata
+- не импортируй несуществующие модули
+- не используй pip install
+- не клади тяжёлый код в UI thread
+- не придумывай поля у `MenuItemData`, `HookResult`, `Switch`, `Input`, `Selector`, `Text`
+
+==================================================
+3. ВАЖНЫЙ ФАКТ ПРО ДВИЖОК
+==================================================
+
+ExteraGram использует встроенный Python через Chaquopy.
+Подтверждённая версия Python в этом билде: 3.11.
+
+Это важно, потому что:
+- писать надо обычный Python-код
+- metadata реально разбираются через AST
+- плагины реально используют встроенные Python-модули приложения
+
+==================================================
+4. ДОСТУПНЫЕ ВСТРОЕННЫЕ PYTHON-МОДУЛИ
+==================================================
+
+Подтверждены такие модули:
+- android_utils
+- base_plugin
+- client_utils
+- file_utils
+- hook_utils
+- markdown_utils
+- plugin_settings
+- ui.alert
+- ui.bulletin
+- ui.settings
+- utils.metadata_parser
+
+Значит, это главный source of truth.
+
+==================================================
+5. МЕТАДАННЫЕ ПЛАГИНА
+==================================================
+
+Metadata парсятся через AST.
+Парсер читает верхнеуровневые присваивания вида:
+- `__id__ = "..."` 
+- `__name__ = "..."` 
+- и так далее
+
+Надёжный набор metadata:
+
+```py
+__id__ = "my_plugin"
+__name__ = "My Plugin"
+__description__ = "Short description."
+__version__ = "1.0.0"
+__author__ = "@username"
+__icon__ = "packname/0"
+__min_version__ = "11.12.0"
+```
+
+Подтверждённые поля PluginMetadata:
+- id
+- name
+- description
+- author
+- version
+- icon
+- min_version
+
+Правила metadata:
+- только простые строковые литералы
+- без `+`
+- без `format`
+- без `f"..."` 
+- без вычислений
+- без вызовов функций
+
+Плохо:
+
+```py
+__id__ = "my_" + "plugin"
+__name__ = f"Plugin {1}"
+```
+
+Хорошо:
+
+```py
+__id__ = "my_plugin"
+__name__ = "Plugin"
+```
+
+Минимум, который нужно задавать всегда:
+- `__id__`
+- `__name__`
+
+Практически безопасно всегда задавать весь блок metadata полностью.
+
+==================================================
+6. БАЗОВЫЙ ШАБЛОН ПЛАГИНА
+==================================================
+
+```py
+__id__ = "example_plugin"
+__name__ = "Example Plugin"
+__description__ = "Example."
+__version__ = "1.0.0"
+__author__ = "@username"
+__min_version__ = "11.12.0"
+
+from base_plugin import BasePlugin, HookResult
+
+
+class Plugin(BasePlugin):
+    def on_plugin_load(self):
+        self.log("loaded")
+
+    def on_plugin_unload(self):
+        self.log("unloaded")
+
+    def create_settings(self):
+        return []
+
+    def on_send_message_hook(self, account, params):
+        return HookResult()
+```
+
+==================================================
+7. ЧТО ЕСТЬ В BasePlugin
+==================================================
+
+Подтверждённые поля и состояние внутри BasePlugin:
+- `self.id`
+- `self.name`
+- `self.description`
+- `self.author`
+- `self.min_version`
+- `self.version`
+- `self.icon`
+- `self.error_message`
+- `self.enabled`
+- `self.initialized`
+
+Подтверждённые lifecycle methods:
+- `on_plugin_load(self)`
+- `on_plugin_unload(self)`
+- `create_settings(self)`
+- `on_app_event(self, event_type)`
+
+Подтверждённые hook methods:
+- `pre_request_hook(self, request_name, account, request)`
+- `post_request_hook(self, request_name, account, response, error)`
+- `on_update_hook(self, update_name, account, update)`
+- `on_updates_hook(self, container_name, account, updates)`
+- `on_send_message_hook(self, account, params)`
+
+Подтверждённые registration methods:
+- `add_hook(self, name, match_substring=False, priority=0)`
+- `add_on_send_message_hook(self, priority=0)`
+- `remove_hook(self, name)`
+
+Подтверждённые settings methods:
+- `get_setting(self, key, default)`
+- `set_setting(self, key, value, reload_settings=False)`
+- `export_settings(self)`
+- `import_settings(self, settings, reload_settings=True)`
+
+Подтверждённые Xposed/reflection methods:
+- `hook_method(self, method_or_constructor, xposed_hook, priority=0)`
+- `hook_all_methods(self, hook_class, method_name, xposed_hook, priority=0)`
+- `hook_all_constructors(self, hook_class, xposed_hook, priority=0)`
+- `unhook_method(self, unhook)`
+
+Подтверждённые menu methods:
+- `add_menu_item(self, menu_item_data)`
+- `remove_menu_item(self, item_id)`
+
+Подтверждённый util:
+- `log(self, message)`
+
+==================================================
+8. AppEvent
+==================================================
+
+Подтверждённые AppEvent:
+- `AppEvent.START`
+- `AppEvent.STOP`
+- `AppEvent.PAUSE`
+- `AppEvent.RESUME`
+
+Пример:
+
+```py
+from base_plugin import BasePlugin, AppEvent
+
+
+class Plugin(BasePlugin):
+    def on_app_event(self, event_type):
+        if event_type == AppEvent.START:
+            self.log("app start")
+        elif event_type == AppEvent.STOP:
+            self.log("app stop")
+```
+
+==================================================
+9. HookStrategy и HookResult
+==================================================
+
+Подтверждённые HookStrategy:
+- `HookStrategy.DEFAULT`
+- `HookStrategy.CANCEL`
+- `HookStrategy.MODIFY`
+- `HookStrategy.MODIFY_FINAL`
+
+Подтверждённые поля HookResult:
+- `strategy`
+- `request`
+- `response`
+- `update`
+- `updates`
+- `error`
+- `params`
+
+Правило:
+- если ничего не меняешь, возвращай `HookResult()`
+- если хочешь отменить действие, возвращай `HookResult(strategy=HookStrategy.CANCEL)`
+- если меняешь request / response / update / params, клади объект в правильное поле
+
+Пример send hook:
+
+```py
+from base_plugin import BasePlugin, HookResult, HookStrategy
+
+
+class Plugin(BasePlugin):
+    def on_plugin_load(self):
+        self.add_on_send_message_hook()
+
+    def on_send_message_hook(self, account, params):
+        if isinstance(getattr(params, "message", None), str) and params.message == ".hi":
+            params.message = "Hello"
+            return HookResult(strategy=HookStrategy.MODIFY, params=params)
+        return HookResult()
+```
+
+==================================================
+10. ВСЕ ОСНОВНЫЕ ХУКИ ПЛАГИНА
+==================================================
+
+1. `pre_request_hook(self, request_name, account, request)`
+Для исходящих Telegram API requests.
+
+2. `post_request_hook(self, request_name, account, response, error)`
+Для ответов после запроса.
+
+3. `on_update_hook(self, update_name, account, update)`
+Для одиночных входящих updates.
+
+4. `on_updates_hook(self, container_name, account, updates)`
+Для контейнеров updates.
+
+5. `on_send_message_hook(self, account, params)`
+Для отправляемого пользователем сообщения.
+
+Реальная регистрация:
+- `add_hook(name, match_substring=False, priority=0)`
+- `add_on_send_message_hook(priority=0)`
+
+Практические правила:
+- message send hook регистрируй через `add_on_send_message_hook()`
+- request/update hooks регистрируй через `add_hook(...)`
+- не забывай возвращать `HookResult`
+
+==================================================
+11. HookFilter и hook_filters
+==================================================
+
+Подтверждённые HookFilter helpers:
+- `HookFilter.ResultIsInstanceOf(clazz)`
+- `HookFilter.ResultEqual(value)`
+- `HookFilter.ResultNotEqual(value)`
+- `HookFilter.ArgumentIsNull(index)`
+- `HookFilter.ArgumentIsTrue(index)`
+- `HookFilter.ArgumentIsFalse(index)`
+- `HookFilter.ArgumentNotNull(index)`
+- `HookFilter.ArgumentIsInstanceOf(index, clazz)`
+- `HookFilter.ArgumentEqual(index, value)`
+- `HookFilter.ArgumentNotEqual(index, value)`
+- `HookFilter.Condition(condition, object)`
+- `HookFilter.Or(*filters)`
+
+Подтверждённый decorator:
+- `hook_filters(*filters)`
+
+Используй его для Xposed hooks, если нужно фильтровать вызовы.
+
+Пример:
+
+```py
+from base_plugin import MethodHook, hook_filters, HookFilter
+
+
+class MyHook(MethodHook):
+    @hook_filters(HookFilter.ArgumentNotNull(0))
+    def before_hooked_method(self, param):
+        pass
+```
+
+==================================================
+12. XPOSED HOOKS
+==================================================
+
+Подтверждены базовые классы:
+- `XposedHook`
+- `MethodHook`
+- `MethodReplacement`
+
+Подтверждённые методы:
+- `MethodHook.before_hooked_method(self, param)`
+- `MethodHook.after_hooked_method(self, param)`
+- `MethodReplacement.replace_hooked_method(self, param)`
+
+Надёжная схема:
+- находишь Java method через reflection
+- вызываешь `self.hook_method(...)`
+- при необходимости сохраняешь unhook-объект
+
+Пример:
+
+```py
+from base_plugin import BasePlugin, MethodHook
+from hook_utils import find_class
+
+
+class TitleHook(MethodHook):
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    def before_hooked_method(self, param):
+        self.plugin.log("method called")
+
+
+class Plugin(BasePlugin):
+    def on_plugin_load(self):
+        action_bar = find_class("org.telegram.ui.ActionBar.ActionBar")
+        char_seq = find_class("java.lang.CharSequence")
+        if not action_bar or not char_seq:
+            return
+        try:
+            method = action_bar.getDeclaredMethod("setTitle", char_seq)
+            self.hook_method(method, TitleHook(self))
+        except Exception as e:
+            self.log(str(e))
+```
+
+Практические правила:
+- reflection ломкая, всегда `try/except`
+- если поле/метод по имени не находится, ищи выше по class hierarchy
+- safe mode может ломать или ограничивать hook behavior
+
+==================================================
+13. MenuItemType и MenuItemData
+==================================================
+
+Подтверждённые MenuItemType:
+- `MenuItemType.MESSAGE_CONTEXT_MENU`
+- `MenuItemType.DRAWER_MENU`
+- `MenuItemType.CHAT_ACTION_MENU`
+- `MenuItemType.PROFILE_ACTION_MENU`
+
+Подтверждённые поля MenuItemData:
+- `menu_type`
+- `text`
+- `on_click`
+- `item_id`
+- `icon`
+- `subtext`
+- `condition`
+- `priority`
+
+Пример:
+
+```py
+from base_plugin import BasePlugin, MenuItemData, MenuItemType
+from ui.bulletin import BulletinHelper
+
+
+class Plugin(BasePlugin):
+    def on_plugin_load(self):
+        self.add_menu_item(
+            MenuItemData(
+                menu_type=MenuItemType.CHAT_ACTION_MENU,
+                text="My Action",
+                icon="msg_info",
+                on_click=self.handle_click,
+                priority=50,
+            )
+        )
+
+    def handle_click(self, context):
+        BulletinHelper.show_info("Clicked")
+```
+
+Полезные context keys из документации:
+- `account`
+- `context`
+- `fragment`
+- `dialog_id`
+- `user`
+- `userId`
+- `userFull`
+- `chat`
+- `chatId`
+- `chatFull`
+- `encryptedChat`
+- `message`
+- `groupedMessages`
+- `botInfo`
+
+Никогда не предполагаяй, что ключ точно есть.
+Всегда делай `context.get("message")`, `context.get("fragment")` и так далее.
+
+==================================================
+14. ui.settings REFERENCE
+==================================================
+
+Подтверждённые контролы:
+- `Switch`
+- `Selector`
+- `Input`
+- `Text`
+- `Header`
+- `Divider`
+- `EditText`
+
+--------------------------------------------------
+14.1 Switch
+--------------------------------------------------
+
+Поля:
+- `key`
+- `text`
+- `default`
+- `subtext`
+- `icon`
+- `on_change`
+- `on_long_click`
+- `link_alias`
+
+Пример:
+
+```py
+from ui.settings import Switch
+
+Switch(
+    key="enabled",
+    text="Enable",
+    default=True,
+    subtext="Main switch",
+    icon="msg_settings",
+)
+```
+
+--------------------------------------------------
+14.2 Selector
+--------------------------------------------------
+
+Поля:
+- `key`
+- `text`
+- `default`
+- `items`
+- `icon`
+- `on_change`
+- `on_long_click`
+- `link_alias`
+
+Пример:
+
+```py
+from ui.settings import Selector
+
+Selector(
+    key="mode",
+    text="Mode",
+    default=0,
+    items=["A", "B", "C"],
+    icon="msg_list",
+)
+```
+
+--------------------------------------------------
+14.3 Input
+--------------------------------------------------
+
+Поля:
+- `key`
+- `text`
+- `default`
+- `subtext`
+- `icon`
+- `on_change`
+- `on_long_click`
+- `link_alias`
+
+Пример:
+
+```py
+from ui.settings import Input
+
+Input(
+    key="command",
+    text="Command",
+    default=".test",
+    subtext="Text command",
+    icon="msg_text",
+)
+```
+
+--------------------------------------------------
+14.4 Text
+--------------------------------------------------
+
+Поля:
+- `text`
+- `icon`
+- `accent`
+- `red`
+- `on_click`
+- `create_sub_fragment`
+- `on_long_click`
+- `link_alias`
+
+Пример:
+
+```py
+from ui.settings import Text
+
+Text(
+    text="Open page",
+    icon="msg_arrow_forward",
+    accent=True,
+    on_click=self.some_handler,
+)
+```
+
+Практика:
+- `Text` подходит для действий и переходов
+- не используй `Text` как замену `Input`
+
+--------------------------------------------------
+14.5 Header / Divider
+--------------------------------------------------
+
+Header:
+- `text`
+
+Divider:
+- `text`
+
+--------------------------------------------------
+14.6 EditText
+--------------------------------------------------
+
+Поля:
+- `key`
+- `hint`
+- `default`
+- `multiline`
+- `max_length`
+- `mask`
+- `on_change`
+
+Пример:
+
+```py
+from ui.settings import EditText
+
+EditText(
+    key="template",
+    hint="Enter text",
+    default="",
+    multiline=True,
+    max_length=2000,
+)
+```
+
+==================================================
+15. НАСТРОЙКИ: КАК ЧИТАТЬ И ПИСАТЬ
+==================================================
+
+Используй только BasePlugin wrappers:
+- `self.get_setting("key", default)`
+- `self.set_setting("key", value, reload_settings=False)`
+
+Подтверждённые export/import:
+- `self.export_settings()`
+- `self.import_settings(settings, reload_settings=True)`
+
+Пример:
+
+```py
+enabled = self.get_setting("enabled", True)
+self.set_setting("enabled", False)
+```
+
+Если одна настройка влияет на видимость другой:
+- используй `reload_settings=True`
+
+==================================================
+16. android_utils
+==================================================
+
+Подтверждённые объекты и функции:
+- `OnClickListener`
+- `OnLongClickListener`
+- `run_on_ui_thread(func, delay=0)`
+- `log(data)`
+- `copy_to_clipboard(text)`
+- `R`
+
+`run_on_ui_thread` внутри вызывает `AndroidUtilities.runOnUIThread`.
+
+Пример:
+
+```py
+from android_utils import run_on_ui_thread
+
+
+def task():
+    pass
+
+
+run_on_ui_thread(task)
+```
+
+`copy_to_clipboard(text)` использует AndroidUtilities и показывает bulletin о копировании.
+
+==================================================
+17. client_utils
+==================================================
+
+Подтверждённые queue helpers:
+- `get_queue_by_name(queue_name)`
+- `run_on_queue(fn, queue_name=..., delay=...)`
+
+Подтверждённые queue constants:
+- `STAGE_QUEUE`
+- `GLOBAL_QUEUE`
+- `CACHE_CLEAR_QUEUE`
+- `SEARCH_QUEUE`
+- `PHONE_BOOK_QUEUE`
+- `THEME_QUEUE`
+- `EXTERNAL_NETWORK_QUEUE`
+- `PLUGINS_QUEUE`
+
+Главное правило:
+- всё тяжёлое гоняй через `run_on_queue`
+
+Пример:
+
+```py
+from client_utils import run_on_queue
+
+
+def work():
+    pass
+
+
+run_on_queue(work)
+```
+
+--------------------------------------------------
+17.1 Request helpers
+--------------------------------------------------
+
+Подтверждены:
+- `RequestCallback`
+- `send_request(request, fn)`
+
+--------------------------------------------------
+17.2 Current app/account helpers
+--------------------------------------------------
+
+Подтверждены:
+- `get_last_fragment()`
+- `get_account_instance()`
+- `get_messages_controller()`
+- `get_contacts_controller()`
+- `get_media_data_controller()`
+- `get_connections_manager()`
+- `get_location_controller()`
+- `get_notifications_controller()`
+- `get_messages_storage()`
+- `get_send_messages_helper()`
+- `get_file_loader()`
+- `get_secret_chat_helper()`
+- `get_download_controller()`
+- `get_notifications_settings()`
+- `get_notification_center()`
+- `get_media_controller()`
+- `get_user_config()`
+
+Подтверждено по коду:
+- `get_last_fragment()` вызывает `LaunchActivity.getSafeLastFragment()`
+
+--------------------------------------------------
+17.3 Send / edit helpers
+--------------------------------------------------
+
+Подтверждены:
+- `send_message(params)`
+- `send_text(peer, text, **kwargs)`
+- `send_photo(peer, file_path, caption="", high_quality=False, **kwargs)`
+- `send_document(peer, file_path, caption="", **kwargs)`
+- `send_video(peer, file_path, caption="", **kwargs)`
+- `send_audio(peer, file_path, caption="", **kwargs)`
+- `edit_message(message_obj, text=None, file_path=None, with_spoiler=False, **kwargs)`
+
+Подтверждённые ключи, которые реально поддерживает `send_message`:
+- `peer`
+- `message`
+- `photo`
+- `document`
+- `videoEditedInfo`
+- `path`
+- `replyToMsg`
+- `replyToTopMsg`
+- `entities`
+- `replyMarkup`
+- `params`
+- `searchLinks`
+- `notify`
+- `updateStickersOrder`
+- `hasMediaSpoilers`
+- `invert_media`
+- `sendingHighQuality`
+
+Это очень важно:
+- не выдумывай другие поля
+- если отправляешь rich text, работай через `entities`
+
+Пример:
+
+```py
+from client_utils import send_text
+
+send_text(123456789, "Hello")
+```
+
+==================================================
+18. file_utils
+==================================================
+
+Подтверждены:
+- `get_plugins_dir()`
+- `get_cache_dir()`
+- `get_files_dir()`
+- `get_images_dir()`
+- `get_videos_dir()`
+- `get_audios_dir()`
+- `get_documents_dir()`
+- `read_file(file_path)`
+- `write_file(file_path, content)`
+- `delete_file(file_path)`
+- `ensure_dir_exists(dir_path)`
+- `list_dir(path, recursive=False, include_files=True, include_dirs=False, extensions=None)`
+
+Подтверждено:
+- `get_plugins_dir()` использует `PluginsController.getInstance().pluginsDir`
+
+Значит, если плагину нужна локальная папка данных:
+- бери её от `get_plugins_dir()`
+- создавай подпапку через `ensure_dir_exists`
+
+Пример:
+
+```py
+import os
+from file_utils import get_plugins_dir, ensure_dir_exists, write_file, read_file
+
+base = os.path.join(get_plugins_dir(), "my_plugin_data")
+ensure_dir_exists(base)
+path = os.path.join(base, "config.txt")
+write_file(path, "hello")
+text = read_file(path)
+```
+
+==================================================
+19. hook_utils
+==================================================
+
+Подтверждены:
+- `find_class(class_name)`
+- `get_private_field(obj, field_name)`
+- `set_private_field(obj, field_name, new_value)`
+- `get_static_private_field(clazz, field_name)`
+- `set_static_private_field(clazz, field_name, new_value)`
+
+Используй это для reflection.
+
+Пример:
+
+```py
+from hook_utils import find_class
+
+clazz = find_class("org.telegram.ui.ActionBar.ActionBar")
+if clazz:
+    pass
+```
+
+Практика:
+- всегда проверяй `if clazz:`
+- reflection оборачивай в `try/except`
+
+==================================================
+20. markdown_utils
+==================================================
+
+Подтверждены:
+- `TLEntityType`
+- `RawEntity`
+- `ParsedMessage`
+- `count_chars_until(string, stop_chars, start_index)`
+- `get_utf16_code_unit_offset(text, python_char_index)`
+- `parse_markdown(markdown)`
+
+Подтверждённые TLEntityType:
+- `code`
+- `pre`
+- `strikethrough`
+- `text_link`
+- `bold`
+- `italic`
+- `underline`
+- `spoiler`
+- `custom_emoji`
+
+`parse_markdown(markdown)` возвращает `ParsedMessage`:
+- `parsed.text`
+- `parsed.entities`
+
+`RawEntity.to_tlrpc_object()` конвертирует entity в TLRPC object.
+
+Пример:
+
+```py
+from markdown_utils import parse_markdown
+from java.util import ArrayList
+
+parsed = parse_markdown("*Bold* _Italic_")
+entities = ArrayList()
+for ent in parsed.entities:
+    entities.add(ent.to_tlrpc_object())
+```
+
+==================================================
+21. ui.alert
+==================================================
+
+Подтверждён главный класс:
+- `AlertDialogBuilder`
+
+Подтверждённые константы:
+- `ALERT_TYPE_MESSAGE`
+- `ALERT_TYPE_LOADING`
+- `ALERT_TYPE_SPINNER`
+- `BUTTON_POSITIVE`
+- `BUTTON_NEGATIVE`
+- `BUTTON_NEUTRAL`
+
+Подтверждённые методы:
+- `__init__(context, progress_style=..., resources_provider=None)`
+- `get_context()`
+- `set_title(title)`
+- `set_message(message)`
+- `set_message_text_view_clickable(clickable)`
+- `set_positive_button(text, listener=None)`
+- `set_negative_button(text, listener=None)`
+- `set_neutral_button(text, listener=None)`
+- `make_button_red(button_type)`
+- `set_on_back_button_listener(listener)`
+- `set_view(view, height=-2)`
+- `set_items(items, listener=None, icons=None)`
+- `set_on_dismiss_listener(listener)`
+- `set_on_cancel_listener(listener)`
+- `set_top_image(res_id, background_color)`
+- `set_top_drawable(drawable, background_color)`
+- `set_top_animation(res_id, size, auto_repeat, background_color, layer_colors=None)`
+- `set_top_animation_is_new(is_new)`
+- `set_dim_enabled(enabled)`
+- `set_dialog_button_color_key(theme_key)`
+- `set_blurred_background(blur, blur_behind_if_possible=True)`
+- `create()`
+- `show()`
+- `dismiss()`
+- `get_dialog()`
+- `get_button(button_type)`
+- `set_progress(progress)`
+- `set_cancelable(cancelable)`
+- `set_canceled_on_touch_outside(cancel)`
+
+Пример:
+
+```py
+from ui.alert import AlertDialogBuilder
+from client_utils import get_last_fragment
+from android_utils import run_on_ui_thread
+
+
+def show_dialog():
+    fragment = get_last_fragment()
+    if not fragment:
+        return
+    activity = fragment.getParentActivity()
+    if not activity:
+        return
+    builder = AlertDialogBuilder(activity)
+    builder.set_title("Plugin")
+    builder.set_message("Hello")
+    builder.set_positive_button("OK", lambda b, w: b.dismiss())
+    builder.show()
+
+
+run_on_ui_thread(show_dialog)
+```
+
+==================================================
+22. ui.bulletin
+==================================================
+
+Подтверждён главный класс:
+- `BulletinHelper`
+
+Подтверждённые duration constants:
+- `BulletinHelper.DURATION_SHORT = 1500`
+- `BulletinHelper.DURATION_LONG = 2750`
+- `BulletinHelper.DURATION_PROLONG = 5000`
+
+Подтверждённые методы:
+- `show_info(message, fragment=None)`
+- `show_error(message, fragment=None)`
+- `show_success(message, fragment=None)`
+- `show_simple(text, icon_res_id, fragment=None)`
+- `show_two_line(title, subtitle, icon_res_id, fragment=None)`
+- `show_with_button(text, icon_res_id, button_text, on_click, fragment=None, duration=...)`
+- `show_undo(text, on_undo, on_action=None, subtitle=None, fragment=None)`
+- `show_copied_to_clipboard(message=None, fragment=None)`
+- `show_link_copied(is_private_link_info=False, fragment=None)`
+- `show_file_saved_to_gallery(is_video=False, amount=1, fragment=None)`
+- `show_file_saved_to_downloads(file_type_enum_name="UNKNOWN", amount=1, fragment=None)`
+
+Практика:
+- bulletins уже сами безопасно показываются через UI helper
+- но fragment лучше передавать, если он у тебя есть
+
+Пример:
+
+```py
+from ui.bulletin import BulletinHelper
+from client_utils import get_last_fragment
+
+BulletinHelper.show_success("Done", get_last_fragment())
+```
+
+==================================================
+23. plugin_settings
+==================================================
+
+Это внутренний модуль хранения настроек.
+Обычно в плагине напрямую его импортировать не нужно.
+
+Подтверждены функции:
+- `init(plugins_dir_path, all_shared_prefs)`
+- `get_setting(plugin_id, key, default)`
+- `set_setting(plugin_id, key, value)`
+- `clear_settings(plugin_id)`
+- `get_all_settings(plugin_id)`
+- `set_all_settings(plugin_id, settings)`
+
+Практика:
+- в обычном плагине используй `self.get_setting()` и `self.set_setting()`
+- напрямую `plugin_settings` используй только если очень понимаешь зачем
+
+==================================================
+24. utils.metadata_parser
+==================================================
+
+Подтверждена функция:
+- `get_metadata(file_path)`
+
+Важно:
+- parser реально читает AST
+- metadata должны быть top-level constants
+
+==================================================
+25. РЕАЛЬНЫЕ plugin-related JAVA КЛАССЫ В DEX
+==================================================
+
+Подтверждены:
+- `com.exteragram.messenger.plugins.Plugin`
+- `com.exteragram.messenger.plugins.PluginsController`
+- `com.exteragram.messenger.plugins.hooks.PluginsHooks`
+- `com.exteragram.messenger.plugins.hooks.MenuItemRecord`
+- `com.exteragram.messenger.plugins.models.SettingItem`
+- `com.exteragram.messenger.plugins.ui.PluginsActivity`
+- `com.exteragram.messenger.plugins.ui.components.PluginCell`
+- `com.exteragram.messenger.plugins.ui.components.PluginsMenuWrapper`
+- `com.exteragram.messenger.plugins.utils.MenuContextBuilder`
+- `com.exteragram.messenger.plugins.utils.NativeCrashHandler`
+
+Также в dex видны внутренние identifiers:
+- `pluginsDir`
+- `pluginsQueue`
+- `pluginsDocumentation`
+- `pluginsSafeMode`
+- `pluginsUpdated`
+- `pluginMenuItemsUpdated`
+- `pluginSettingsRegistered`
+- `pluginSettingsUnregistered`
+- `plugin_enabled_`
+
+Вывод:
+- plugin system в приложении реальный и глубокий
+- safe mode существует
+- menu/settings updates имеют внутренние notifications
+
+==================================================
+26. ЧЕГО НЕ НУЖНО ДЕЛАТЬ
+==================================================
+
+Не надо:
+- строить весь плагин вокруг имени `PythonPluginsEngine`
+- жёстко завязываться на старые не подтверждённые промпты
+- пытаться импортировать случайные Android/Telegram классы без проверки через `find_class`
+- пихать сторонние библиотеки
+- писать plugin code кусками вместо полного файла
+
+==================================================
+27. НАДЁЖНЫЕ ПАТТЕРНЫ ДЛЯ ПЛАГИНОВ
+==================================================
+
+--------------------------------------------------
+27.1 Простая настройка + send hook
+--------------------------------------------------
+
+```py
+__id__ = "caps_guard"
+__name__ = "Caps Guard"
+__description__ = "Edits outgoing text."
+__version__ = "1.0.0"
+__author__ = "@username"
+__min_version__ = "11.12.0"
+
+from base_plugin import BasePlugin, HookResult, HookStrategy
+from ui.settings import Switch
+
+
+class Plugin(BasePlugin):
+    def on_plugin_load(self):
+        self.add_on_send_message_hook()
+
+    def create_settings(self):
+        return [
+            Switch(key="enabled", text="Enable", default=True),
+        ]
+
+    def on_send_message_hook(self, account, params):
+        if not self.get_setting("enabled", True):
+            return HookResult()
+        text = getattr(params, "message", None)
+        if isinstance(text, str) and text.isupper():
+            params.message = text.lower()
+            return HookResult(strategy=HookStrategy.MODIFY, params=params)
+        return HookResult()
+```
+
+--------------------------------------------------
+27.2 Menu action plugin
+--------------------------------------------------
+
+```py
+__id__ = "menu_demo"
+__name__ = "Menu Demo"
+__description__ = "Adds a chat menu item."
+__version__ = "1.0.0"
+__author__ = "@username"
+__min_version__ = "11.12.0"
+
+from base_plugin import BasePlugin, MenuItemData, MenuItemType
+from ui.bulletin import BulletinHelper
+
+
+class Plugin(BasePlugin):
+    def on_plugin_load(self):
+        self.add_menu_item(
+            MenuItemData(
+                menu_type=MenuItemType.CHAT_ACTION_MENU,
+                text="Demo Action",
+                icon="msg_info",
+                on_click=self.handle_click,
+            )
+        )
+
+    def handle_click(self, context):
+        BulletinHelper.show_info("Menu clicked", context.get("fragment"))
+```
+
+--------------------------------------------------
+27.3 Background task pattern
+--------------------------------------------------
+
+```py
+from client_utils import run_on_queue
+from android_utils import run_on_ui_thread
+from ui.bulletin import BulletinHelper
+
+
+def heavy_work():
+    result = "done"
+    run_on_ui_thread(lambda: BulletinHelper.show_success(result))
+
+
+run_on_queue(heavy_work)
+```
+
+--------------------------------------------------
+27.4 Markdown send pattern
+--------------------------------------------------
+
+```py
+from markdown_utils import parse_markdown
+from java.util import ArrayList
+from base_plugin import BasePlugin, HookResult, HookStrategy
+
+
+class Plugin(BasePlugin):
+    def on_plugin_load(self):
+        self.add_on_send_message_hook()
+
+    def on_send_message_hook(self, account, params):
+        text = getattr(params, "message", None)
+        if text == ".demo":
+            parsed = parse_markdown("*Bold* _Italic_")
+            params.message = parsed.text
+            entities = ArrayList()
+            for ent in parsed.entities:
+                entities.add(ent.to_tlrpc_object())
+            params.entities = entities
+            return HookResult(strategy=HookStrategy.MODIFY, params=params)
+        return HookResult()
+```
+
+--------------------------------------------------
+27.5 Alert dialog pattern
+--------------------------------------------------
+
+```py
+from client_utils import get_last_fragment
+from android_utils import run_on_ui_thread
+from ui.alert import AlertDialogBuilder
+
+
+def show_alert():
+    fragment = get_last_fragment()
+    if not fragment:
+        return
+    activity = fragment.getParentActivity()
+    if not activity:
+        return
+    builder = AlertDialogBuilder(activity)
+    builder.set_title("Plugin")
+    builder.set_message("Hello from plugin")
+    builder.set_positive_button("Close", lambda b, w: b.dismiss())
+    builder.show()
+
+
+run_on_ui_thread(show_alert)
+```
+
+==================================================
+28. ШАБЛОН ОБРАБОТКИ ОШИБОК
+==================================================
+
+Используй такой паттерн:
+
+```py
+def safe_action(self):
+    try:
+        pass
+    except Exception as e:
+        self.log(str(e))
+```
+
+Для UI-ошибок полезно:
+- показывать `BulletinHelper.show_error(...)`
+- или диалог через `AlertDialogBuilder`
+
+==================================================
+29. ЧЕКЛИСТ ПЕРЕД ВЫДАЧЕЙ ПЛАГИНА
+==================================================
+
+Перед тем как отдать код, проверь:
+
+- Есть `__id__`
+- Есть `__name__`
+- Metadata статические
+- Есть `class Plugin(BasePlugin)`
+- Импорты только из реального API
+- Нет тяжёлых действий в UI thread
+- Все hooks возвращают `HookResult`
+- Reflection обёрнут в `try/except`
+- `fragment/activity` проверяются на `None`
+- Настройки строятся через `ui.settings`
+- Menu items строятся через `MenuItemData`
+- Если меняется message, то меняется `params.message`
+- Если есть markdown entities, они конвертируются в TLRPC entities
+
+==================================================
+30. КАК ИИ ДОЛЖНА ОТВЕЧАТЬ ПОЛЬЗОВАТЕЛЮ
+==================================================
+
+Когда пользователь просит плагин:
+- не объясняй долго
+- не давай куски
+- не пиши “вот пример”
+- сразу давай полный рабочий код
+- если нужен `.plugin`, возвращай содержимое готового `.plugin`
+
+Если задача рискованная:
+- выбери более простой, но реальный вариант
+- не выдумывай unavailable API
+
+Если пользователь просит “крутой” плагин:
+- добавляй настройки
+- menu item
+- bulletins
+- обработку ошибок
+- аккуратный fallback
+- не забывай производительность
+
+==================================================
+31. КОРОТКАЯ ФОРМА ДЛЯ ДРУГОЙ ИИ
+==================================================
+
+Если нужно совсем коротко задать роль другой ИИ, можно использовать это:
+
+Ты пишешь только рабочие ExteraGram plugins в виде одного полного `.plugin` файла.
+Используй только реальные модули ExteraGram: base_plugin, client_utils, android_utils, hook_utils, file_utils, markdown_utils, ui.alert, ui.bulletin, ui.settings.
+Metadata пиши только статическими строками через top-level `__id__`, `__name__`, `__description__`, `__version__`, `__author__`, `__min_version__`, `__icon__`.
+Плагин всегда делай через `class Plugin(BasePlugin)`.
+Для send hook используй `add_on_send_message_hook()` и `on_send_message_hook(self, account, params)`.
+Для request/update hooks используй `add_hook(...)`, `pre_request_hook`, `post_request_hook`, `on_update_hook`, `on_updates_hook`.
+Для menu items используй `MenuItemData` и `MenuItemType`.
+Для настроек используй только `Switch`, `Selector`, `Input`, `Text`, `Header`, `Divider`, `EditText`.
+UI делай через `run_on_ui_thread`, тяжёлую работу через `run_on_queue`.
+Если меняешь flow, возвращай `HookResult` с правильным `HookStrategy`.
+Ничего не выдумывай, не используй внешние зависимости, не делай metadata динамическими.
+
+==================================================
+32. ГЛАВНОЕ ПРАВИЛО
+==================================================
+
+Если есть конфликт между “красивым выдуманным кодом” и “тем, что реально подтверждено ExteraGram API”, всегда выбирай реальный подтверждённый API.
+
+==================================================
+33. ДОКАЗАТЕЛЬСТВА И ИСТОЧНИКИ
+==================================================
+
+Ниже не советы, а именно доказательная база, на которой построена инструкция.
+
+--------------------------------------------------
+33.1 Доказательство, что ExteraGram реально содержит Python plugin API
+--------------------------------------------------
+
+Файл:
+- `/storage/emulated/0/Download/етг/assets/chaquopy/app.imy`
+
+Определён как:
+- Zip archive
+
+Внутри него подтверждены:
+- `android_utils.pyc`
+- `base_plugin.pyc`
+- `client_utils.pyc`
+- `dev_server.pyc`
+- `file_utils.pyc`
+- `hook_utils.pyc`
+- `markdown_utils.pyc`
+- `plugin_settings.pyc`
+- `ui/__init__.pyc`
+- `ui/alert.pyc`
+- `ui/bulletin.pyc`
+- `ui/settings.pyc`
+- `utils/__init__.pyc`
+- `utils/metadata_parser.pyc`
+
+Это значит:
+- plugin API не выдуман
+- он реально поставляется вместе с приложением
+- строить плагины нужно именно вокруг этих модулей
+
+--------------------------------------------------
+33.2 Доказательство версии Python
+--------------------------------------------------
+
+Файл:
+- `/storage/emulated/0/Download/етг/assets/chaquopy/build.json`
+
+Подтверждено:
+- `"python_version": "3.11"`
+
+Значит:
+- внутри ExteraGram Python 3.11
+- pyc-файлы из app.imy соответствуют Python 3.11
+
+--------------------------------------------------
+33.3 Доказательство структуры metadata
+--------------------------------------------------
+
+Файл:
+- `utils/metadata_parser.pyc` внутри `app.imy`
+
+Извлечённая функция:
+- `get_metadata(file_path)`
+
+Из code object подтверждено, что parser использует:
+- `open`
+- `read`
+- `ast.parse`
+- `ast.iter_child_nodes`
+- проверки на `Assign`
+- проверки на `Name`
+- проверки на `Constant`
+
+Это прямое доказательство, что metadata читаются через AST и top-level constants.
+
+Значит:
+- строковые metadata должны быть статическими
+- dynamic metadata опасны
+
+--------------------------------------------------
+33.4 Доказательство BasePlugin API
+--------------------------------------------------
+
+Файл:
+- `base_plugin.pyc` внутри `app.imy`
+
+Подтверждённые классы:
+- `PluginMetadata`
+- `HookStrategy`
+- `HookResult`
+- `PluginError`
+- `XposedHook`
+- `MethodReplacement`
+- `MethodHook`
+- `AppEvent`
+- `MenuItemType`
+- `MenuItemData`
+- `HookFilterData`
+- `HookFilter`
+- `BasePlugin`
+
+Подтверждённые методы `BasePlugin`:
+- `__init__(self)`
+- `on_plugin_load(self)`
+- `on_plugin_unload(self)`
+- `create_settings(self)`
+- `on_app_event(self, event_type)`
+- `pre_request_hook(self, request_name, account, request)`
+- `post_request_hook(self, request_name, account, response, error)`
+- `on_update_hook(self, update_name, account, update)`
+- `on_updates_hook(self, container_name, account, updates)`
+- `on_send_message_hook(self, account, params)`
+- `add_hook(self, name, match_substring, priority)`
+- `add_on_send_message_hook(self, priority)`
+- `remove_hook(self, name)`
+- `get_setting(self, key, default)`
+- `set_setting(self, key, value, reload_settings)`
+- `export_settings(self)`
+- `import_settings(self, settings, reload_settings)`
+- `hook_method(self, method_or_constructor, xposed_hook, priority)`
+- `hook_all_methods(self, hook_class, method_name, xposed_hook, priority)`
+- `hook_all_constructors(self, hook_class, xposed_hook, priority)`
+- `unhook_method(self, unhook)`
+- `log(self, message)`
+- `add_menu_item(self, menu_item_data)`
+- `remove_menu_item(self, item_id)`
+
+Извлечённые поля/имена из `BasePlugin.__init__`:
+- `id`
+- `name`
+- `description`
+- `author`
+- `min_version`
+- `version`
+- `icon`
+- `error_message`
+- `enabled`
+- `initialized`
+
+--------------------------------------------------
+33.5 Доказательство HookStrategy, HookResult, AppEvent, MenuItemType
+--------------------------------------------------
+
+Источник:
+- `base_plugin.pyc`
+
+Из code objects подтверждено:
+
+`HookStrategy`:
+- `CANCEL`
+- `MODIFY`
+- `DEFAULT`
+- `MODIFY_FINAL`
+
+`HookResult` fields:
+- `strategy`
+- `request`
+- `response`
+- `update`
+- `updates`
+- `error`
+- `params`
+
+`AppEvent`:
+- `START`
+- `STOP`
+- `PAUSE`
+- `RESUME`
+
+`MenuItemType`:
+- `MESSAGE_CONTEXT_MENU`
+- `DRAWER_MENU`
+- `CHAT_ACTION_MENU`
+- `PROFILE_ACTION_MENU`
+
+--------------------------------------------------
+33.6 Доказательство HookFilter API
+--------------------------------------------------
+
+Источник:
+- `base_plugin.pyc`
+
+Подтверждены helper methods:
+- `ResultIsInstanceOf(clazz)`
+- `ResultEqual(value)`
+- `ResultNotEqual(value)`
+- `ArgumentIsNull(index)`
+- `ArgumentIsTrue(index)`
+- `ArgumentIsFalse(index)`
+- `ArgumentNotNull(index)`
+- `ArgumentIsInstanceOf(index, clazz)`
+- `ArgumentEqual(index, value)`
+- `ArgumentNotEqual(index, value)`
+- `Condition(condition, object)`
+- `Or(*filters)`
+
+Подтверждён decorator:
+- `hook_filters(*filters)`
+
+--------------------------------------------------
+33.7 Доказательство Xposed hook base classes
+--------------------------------------------------
+
+Источник:
+- `base_plugin.pyc`
+
+Подтверждены:
+- `MethodHook.before_hooked_method(self, param)`
+- `MethodHook.after_hooked_method(self, param)`
+- `MethodReplacement.replace_hooked_method(self, param)`
+
+Также в `BasePlugin.hook_method` по извлечённым именам видно использование:
+- `XposedBridge.hookMethod`
+- `PluginsController.getInstance().addXposedHook`
+
+В `hook_all_methods`:
+- `XposedBridge.hookAllMethods`
+- `PluginsController.getInstance().addXposedHooks`
+
+В `hook_all_constructors`:
+- `XposedBridge.hookAllConstructors`
+- `PluginsController.getInstance().addXposedHooks`
+
+Это прямое доказательство, что Xposed-style hooks реально встроены в plugin system.
+
+--------------------------------------------------
+33.8 Доказательство menu API
+--------------------------------------------------
+
+Источник:
+- `base_plugin.pyc`
+
+В `BasePlugin.add_menu_item` по извлечённым именам подтверждено использование:
+- `PluginsController.getInstance().addMenuItem`
+- `PluginsConstants.MenuItemProperties`
+- `MENU_TYPE`
+- `TEXT`
+- `ON_CLICK`
+- `ITEM_ID`
+- `ICON`
+- `SUBTEXT`
+- `CONDITION`
+- `PRIORITY`
+
+Значит:
+- menu item строится через реальные внутренние properties ExteraGram
+- `MenuItemData` это не декоративный класс, а рабочая структура
+
+--------------------------------------------------
+33.9 Доказательство settings API
+--------------------------------------------------
+
+Источник:
+- `ui/settings.pyc`
+
+Подтверждены контролы:
+- `Switch`
+- `Selector`
+- `Input`
+- `Text`
+- `Header`
+- `Divider`
+- `EditText`
+
+Подтверждённые поля `Switch`:
+- `key`
+- `text`
+- `default`
+- `subtext`
+- `icon`
+- `on_change`
+- `on_long_click`
+- `link_alias`
+
+Подтверждённые поля `Selector`:
+- `key`
+- `text`
+- `default`
+- `items`
+- `icon`
+- `on_change`
+- `on_long_click`
+- `link_alias`
+
+Подтверждённые поля `Input`:
+- `key`
+- `text`
+- `default`
+- `subtext`
+- `icon`
+- `on_change`
+- `on_long_click`
+- `link_alias`
+
+Подтверждённые поля `Text`:
+- `text`
+- `icon`
+- `accent`
+- `red`
+- `on_click`
+- `create_sub_fragment`
+- `on_long_click`
+- `link_alias`
+
+Подтверждённые поля `Header`:
+- `text`
+
+Подтверждённые поля `Divider`:
+- `text`
+
+Подтверждённые поля `EditText`:
+- `key`
+- `hint`
+- `default`
+- `multiline`
+- `max_length`
+- `mask`
+- `on_change`
+
+--------------------------------------------------
+33.10 Доказательство android_utils
+--------------------------------------------------
+
+Источник:
+- `android_utils.pyc`
+
+Подтверждены:
+- `OnClickListener`
+- `OnLongClickListener`
+- `run_on_ui_thread(func, delay)`
+- `log(data)`
+- `copy_to_clipboard(text)`
+- `R`
+
+По извлечённым именам `run_on_ui_thread` подтверждено использование:
+- `AndroidUtilities.runOnUIThread`
+
+По извлечённым именам `copy_to_clipboard` подтверждено использование:
+- `AndroidUtilities.addToClipboard`
+- `ui.bulletin.BulletinHelper.show_copied_to_clipboard`
+
+--------------------------------------------------
+33.11 Доказательство client_utils
+--------------------------------------------------
+
+Источник:
+- `client_utils.pyc`
+
+Подтверждены:
+- `get_queue_by_name(queue_name)`
+- `run_on_queue(fn, queue_name, delay)`
+- `RequestCallback`
+- `send_request(request, fn)`
+- `get_last_fragment()`
+- `get_account_instance()`
+- `get_messages_controller()`
+- `get_contacts_controller()`
+- `get_media_data_controller()`
+- `get_connections_manager()`
+- `get_location_controller()`
+- `get_notifications_controller()`
+- `get_messages_storage()`
+- `get_send_messages_helper()`
+- `get_file_loader()`
+- `get_secret_chat_helper()`
+- `get_download_controller()`
+- `get_notifications_settings()`
+- `get_notification_center()`
+- `get_media_controller()`
+- `get_user_config()`
+- `send_message(params)`
+- `send_text(peer, text, **kwargs)`
+- `send_photo(peer, file_path, caption, high_quality, **kwargs)`
+- `send_document(peer, file_path, caption, **kwargs)`
+- `send_video(peer, file_path, caption, **kwargs)`
+- `send_audio(peer, file_path, caption, **kwargs)`
+- `edit_message(message_obj, text, file_path, with_spoiler, **kwargs)`
+- `NotificationCenterDelegate`
+
+По извлечённым именам:
+- `get_last_fragment()` использует `LaunchActivity.getSafeLastFragment`
+- `run_on_queue()` использует `DispatchQueue.postRunnable`
+- `get_queue_by_name()` использует reflection на `Utilities`
+
+Подтверждённые поля, которые реально поддерживает `send_message`:
+- `peer`
+- `message`
+- `photo`
+- `document`
+- `videoEditedInfo`
+- `path`
+- `replyToMsg`
+- `replyToTopMsg`
+- `entities`
+- `replyMarkup`
+- `params`
+- `searchLinks`
+- `notify`
+- `updateStickersOrder`
+- `hasMediaSpoilers`
+- `invert_media`
+- `sendingHighQuality`
+
+--------------------------------------------------
+33.12 Доказательство file_utils
+--------------------------------------------------
+
+Источник:
+- `file_utils.pyc`
+
+Подтверждены:
+- `get_plugins_dir()`
+- `get_cache_dir()`
+- `get_files_dir()`
+- `get_images_dir()`
+- `get_videos_dir()`
+- `get_audios_dir()`
+- `get_documents_dir()`
+- `read_file(file_path)`
+- `write_file(file_path, content)`
+- `delete_file(file_path)`
+- `ensure_dir_exists(dir_path)`
+- `list_dir(path, recursive, include_files, include_dirs, extensions)`
+
+По извлечённым именам подтверждено:
+- `get_plugins_dir()` использует `PluginsController.getInstance().pluginsDir.getAbsolutePath()`
+
+--------------------------------------------------
+33.13 Доказательство hook_utils
+--------------------------------------------------
+
+Источник:
+- `hook_utils.pyc`
+
+Подтверждены:
+- `find_class(class_name)`
+- `get_private_field(obj, field_name)`
+- `set_private_field(obj, field_name, new_value)`
+- `get_static_private_field(clazz, field_name)`
+- `set_static_private_field(clazz, field_name, new_value)`
+
+--------------------------------------------------
+33.14 Доказательство markdown_utils
+--------------------------------------------------
+
+Источник:
+- `markdown_utils.pyc`
+
+Подтверждены:
+- `TLEntityType`
+- `RawEntity`
+- `ParsedMessage`
+- `count_chars_until(string, stop_chars, start_index)`
+- `get_utf16_code_unit_offset(text, python_char_index)`
+- `parse_markdown(markdown)`
+
+Подтверждённые TLEntityType:
+- `code`
+- `pre`
+- `strikethrough`
+- `text_link`
+- `bold`
+- `italic`
+- `underline`
+- `spoiler`
+- `custom_emoji`
+
+Подтверждённые поля `RawEntity`:
+- `type`
+- `offset`
+- `length`
+- `language`
+- `url`
+- `document_id`
+
+Подтверждённые поля `ParsedMessage`:
+- `text`
+- `entities`
+
+--------------------------------------------------
+33.15 Доказательство ui.alert
+--------------------------------------------------
+
+Источник:
+- `ui/alert.pyc`
+
+Подтверждён класс:
+- `AlertDialogBuilder`
+
+Подтверждённые константы:
+- `ALERT_TYPE_MESSAGE`
+- `ALERT_TYPE_LOADING`
+- `ALERT_TYPE_SPINNER`
+- `BUTTON_POSITIVE`
+- `BUTTON_NEGATIVE`
+- `BUTTON_NEUTRAL`
+
+Подтверждённые методы:
+- `get_context`
+- `set_title`
+- `set_message`
+- `set_message_text_view_clickable`
+- `set_positive_button`
+- `set_negative_button`
+- `set_neutral_button`
+- `make_button_red`
+- `set_on_back_button_listener`
+- `set_view`
+- `set_items`
+- `set_on_dismiss_listener`
+- `set_on_cancel_listener`
+- `set_top_image`
+- `set_top_drawable`
+- `set_top_animation`
+- `set_top_animation_is_new`
+- `set_dim_enabled`
+- `set_dialog_button_color_key`
+- `set_blurred_background`
+- `create`
+- `show`
+- `dismiss`
+- `get_dialog`
+- `get_button`
+- `set_progress`
+- `set_cancelable`
+- `set_canceled_on_touch_outside`
+
+--------------------------------------------------
+33.16 Доказательство ui.bulletin
+--------------------------------------------------
+
+Источник:
+- `ui/bulletin.pyc`
+
+Подтверждён класс:
+- `BulletinHelper`
+
+Подтверждённые durations:
+- `DURATION_SHORT = 1500`
+- `DURATION_LONG = 2750`
+- `DURATION_PROLONG = 5000`
+
+Подтверждённые методы:
+- `show_info`
+- `show_error`
+- `show_success`
+- `show_simple`
+- `show_two_line`
+- `show_with_button`
+- `show_undo`
+- `show_copied_to_clipboard`
+- `show_link_copied`
+- `show_file_saved_to_gallery`
+- `show_file_saved_to_downloads`
+
+--------------------------------------------------
+33.17 Доказательство plugin_settings
+--------------------------------------------------
+
+Источник:
+- `plugin_settings.pyc`
+
+Подтверждены:
+- `init`
+- `_load_settings_from_file`
+- `_save_settings_to_file`
+- `get_setting`
+- `set_setting`
+- `clear_settings`
+- `get_all_settings`
+- `set_all_settings`
+
+Это подтверждает, что настройки плагина реально хранятся отдельным модулем и BasePlugin лишь оборачивает его.
+
+--------------------------------------------------
+33.18 Доказательство plugin-related Java classes в dex
+--------------------------------------------------
+
+Источник:
+- `classes.dex`
+- `classes4.dex`
+- `classes5.dex`
+
+Подтверждены строки и class names:
+- `com.exteragram.messenger.plugins.Plugin`
+- `com.exteragram.messenger.plugins.PluginsController`
+- `com.exteragram.messenger.plugins.hooks.PluginsHooks`
+- `com.exteragram.messenger.plugins.hooks.MenuItemRecord`
+- `com.exteragram.messenger.plugins.models.SettingItem`
+- `com.exteragram.messenger.plugins.ui.PluginsActivity`
+- `com.exteragram.messenger.plugins.ui.components.PluginCell`
+- `com.exteragram.messenger.plugins.ui.components.PluginsMenuWrapper`
+- `com.exteragram.messenger.plugins.utils.MenuContextBuilder`
+- `com.exteragram.messenger.plugins.utils.NativeCrashHandler`
+
+Также подтверждены plugin-related internal identifiers:
+- `pluginMenuItemsUpdated`
+- `pluginSettingsRegistered`
+- `pluginSettingsUnregistered`
+- `pluginsUpdated`
+- `pluginsDir`
+- `pluginsQueue`
+- `pluginsDocumentation`
+- `pluginsSafeMode`
+- `pluginsDevMode`
+- `pluginsDeveloperMode`
+- `plugin_enabled_`
+
+Это доказывает:
+- plugin system встроен глубоко
+- у него есть свои update notifications
+- есть safe mode
+- есть developer mode признаки
+
+--------------------------------------------------
+33.19 Уровни надёжности этой инструкции
+--------------------------------------------------
+
+Уровень A. Подтверждено кодом:
+- всё, что извлечено из `app.imy`
+- всё, что извлечено из `build.json`
+- всё, что извлечено из dex strings
+
+Уровень B. Подтверждено кодом и согласуется с документацией:
+- использование `BasePlugin`
+- send hooks
+- menu items
+- settings controls
+- alert/bulletin helpers
+- markdown entities
+
+Уровень C. Есть в документации, но не всегда напрямую подтверждено текущим pyc:
+- полный список возможных context keys в menu callback
+- отдельные сигнатуры некоторых Java-side Telegram методов
+- некоторые экзотические TL object names для hooks
+
+Правило:
+- если что-то уровня C, всегда предпочитай более простой вариант уровня A/B
+
+==================================================
+34. ДОКАЗАТЕЛЬНЫЙ CHECKLIST
+==================================================
+
+Перед тем как доверять коду плагина, спроси:
+
+1. Использует ли он только модули, реально найденные в `app.imy`?
+2. Совпадают ли сигнатуры с тем, что подтверждено в `base_plugin.pyc`, `client_utils.pyc`, `ui/*.pyc`?
+3. Не использует ли он dynamic metadata, хотя metadata parser ждёт constants?
+4. Не придуман ли у него новый тип hook result или новый settings control?
+5. Не импортирует ли он `run_on_queue` из неправильного модуля?
+6. Не строится ли он на сомнительном имени internal engine вместо `BasePlugin` API?
+
+Если ответ плохой хотя бы на один из пунктов, код надо упрощать до подтверждённого API.
+
+==================================================
+35. ВСТАВКИ ИЗ ФАЙЛОВ EXTERAGRAM
+==================================================
+
+Ниже не документация “с потолка”, а фрагменты, восстановленные из реальных файлов ExteraGram.
+Так как в `app.imy` лежат `.pyc`, а не `.py`, это не исходник с исходным форматированием, а максимально близкая реконструкция по code objects и извлечённым именам.
+
+--------------------------------------------------
+35.1 app.imy: состав встроенного Python API
+--------------------------------------------------
+
+Файл:
+- `/storage/emulated/0/Download/етг/assets/chaquopy/app.imy`
+
+Список файлов внутри:
+
+```text
+android_utils.pyc
+base_plugin.pyc
+client_utils.pyc
+dev_server.pyc
+file_utils.pyc
+hook_utils.pyc
+markdown_utils.pyc
+plugin_settings.pyc
+ui/__init__.pyc
+ui/alert.pyc
+ui/bulletin.pyc
+ui/settings.pyc
+utils/__init__.pyc
+utils/metadata_parser.pyc
+```
+
+Это само по себе доказательство, что все эти модули можно считать “родными” для ExteraGram plugins.
+
+--------------------------------------------------
+35.2 build.json: версия Python
+--------------------------------------------------
+
+Файл:
+- `/storage/emulated/0/Download/етг/assets/chaquopy/build.json`
+
+Критичный фрагмент:
+
+```json
+"python_version": "3.11"
+```
+
+--------------------------------------------------
+35.3 Реконструкция BasePlugin из base_plugin.pyc
+--------------------------------------------------
+
+Почти буквальная карта класса:
+
+```py
+class BasePlugin:
+    def __init__(self): ...
+
+    def on_plugin_load(self): ...
+    def on_plugin_unload(self): ...
+    def create_settings(self): ...
+    def on_app_event(self, event_type): ...
+
+    def pre_request_hook(self, request_name, account, request): ...
+    def post_request_hook(self, request_name, account, response, error): ...
+    def on_update_hook(self, update_name, account, update): ...
+    def on_updates_hook(self, container_name, account, updates): ...
+    def on_send_message_hook(self, account, params): ...
+
+    def add_hook(self, name, match_substring=False, priority=0): ...
+    def add_on_send_message_hook(self, priority=0): ...
+    def remove_hook(self, name): ...
+
+    def get_setting(self, key, default): ...
+    def set_setting(self, key, value, reload_settings=False): ...
+    def export_settings(self): ...
+    def import_settings(self, settings, reload_settings=True): ...
+
+    def hook_method(self, method_or_constructor, xposed_hook, priority=0): ...
+    def hook_all_methods(self, hook_class, method_name, xposed_hook, priority=0): ...
+    def hook_all_constructors(self, hook_class, xposed_hook, priority=0): ...
+    def unhook_method(self, unhook): ...
+
+    def add_menu_item(self, menu_item_data): ...
+    def remove_menu_item(self, item_id): ...
+    def log(self, message): ...
+```
+
+Из `BasePlugin.__init__` видны поля:
+
+```py
+self.id
+self.name
+self.description
+self.author
+self.min_version
+self.version
+self.icon
+self.error_message
+self.enabled
+self.initialized
+```
+
+--------------------------------------------------
+35.4 Реконструкция HookStrategy / HookResult / AppEvent
+--------------------------------------------------
+
+Из `base_plugin.pyc`:
+
+```py
+class HookStrategy(Enum):
+    CANCEL = ...
+    MODIFY = ...
+    DEFAULT = ...
+    MODIFY_FINAL = ...
+
+
+class HookResult:
+    strategy: HookStrategy = HookStrategy.DEFAULT
+    request: Any = None
+    response: Any = None
+    update: Any = None
+    updates: Any = None
+    error: Any = None
+    params: Any = None
+
+
+class AppEvent(Enum):
+    START = ...
+    STOP = ...
+    PAUSE = ...
+    RESUME = ...
+```
+
+--------------------------------------------------
+35.5 Реконструкция MenuItemType / MenuItemData
+--------------------------------------------------
+
+Из `base_plugin.pyc`:
+
+```py
+class MenuItemType(Enum):
+    MESSAGE_CONTEXT_MENU = ...
+    DRAWER_MENU = ...
+    CHAT_ACTION_MENU = ...
+    PROFILE_ACTION_MENU = ...
+
+
+class MenuItemData:
+    menu_type
+    text
+    on_click
+    item_id = None
+    icon = None
+    subtext = None
+    condition = None
+    priority = 0
+```
+
+--------------------------------------------------
+35.6 Реконструкция HookFilter API
+--------------------------------------------------
+
+Из `base_plugin.pyc`:
+
+```py
+class HookFilter:
+    def ResultIsInstanceOf(clazz): ...
+    def ResultEqual(value): ...
+    def ResultNotEqual(value): ...
+    def ArgumentIsNull(index): ...
+    def ArgumentIsTrue(index): ...
+    def ArgumentIsFalse(index): ...
+    def ArgumentNotNull(index): ...
+    def ArgumentIsInstanceOf(index, clazz): ...
+    def ArgumentEqual(index, value): ...
+    def ArgumentNotEqual(index, value): ...
+    def Condition(condition, object): ...
+    def Or(*filters): ...
+
+
+def hook_filters(*filters): ...
+```
+
+--------------------------------------------------
+35.7 Реконструкция client_utils из client_utils.pyc
+--------------------------------------------------
+
+Почти буквальная карта top-level API:
+
+```py
+def get_queue_by_name(queue_name): ...
+def run_on_queue(fn, queue_name=..., delay=...): ...
+
+class RequestCallback:
+    def __init__(self, fn): ...
+    def run(self, response, error): ...
+
+def send_request(request, fn): ...
+
+def get_last_fragment(): ...
+def get_account_instance(): ...
+def get_messages_controller(): ...
+def get_contacts_controller(): ...
+def get_media_data_controller(): ...
+def get_connections_manager(): ...
+def get_location_controller(): ...
+def get_notifications_controller(): ...
+def get_messages_storage(): ...
+def get_send_messages_helper(): ...
+def get_file_loader(): ...
+def get_secret_chat_helper(): ...
+def get_download_controller(): ...
+def get_notifications_settings(): ...
+def get_notification_center(): ...
+def get_media_controller(): ...
+def get_user_config(): ...
+
+def send_message(params): ...
+def send_text(peer, text, **kwargs): ...
+def send_photo(peer, file_path, caption="", high_quality=False, **kwargs): ...
+def send_document(peer, file_path, caption="", **kwargs): ...
+def send_video(peer, file_path, caption="", **kwargs): ...
+def send_audio(peer, file_path, caption="", **kwargs): ...
+def edit_message(message_obj, text=None, file_path=None, with_spoiler=False, **kwargs): ...
+```
+
+Отдельно важно: по именам внутри `send_message` реально видны supported keys:
+
+```py
+peer
+message
+photo
+document
+videoEditedInfo
+path
+replyToMsg
+replyToTopMsg
+entities
+replyMarkup
+params
+searchLinks
+notify
+updateStickersOrder
+hasMediaSpoilers
+invert_media
+sendingHighQuality
+```
+
+--------------------------------------------------
+35.8 Реконструкция file_utils из file_utils.pyc
+--------------------------------------------------
+
+```py
+def get_plugins_dir(): ...
+def get_cache_dir(): ...
+def get_files_dir(): ...
+def get_images_dir(): ...
+def get_videos_dir(): ...
+def get_audios_dir(): ...
+def get_documents_dir(): ...
+
+def read_file(file_path): ...
+def write_file(file_path, content): ...
+def delete_file(file_path): ...
+def ensure_dir_exists(dir_path): ...
+def list_dir(path, recursive=False, include_files=True, include_dirs=False, extensions=None): ...
+```
+
+--------------------------------------------------
+35.9 Реконструкция hook_utils из hook_utils.pyc
+--------------------------------------------------
+
+```py
+def find_class(class_name): ...
+def get_private_field(obj, field_name): ...
+def set_private_field(obj, field_name, new_value): ...
+def get_static_private_field(clazz, field_name): ...
+def set_static_private_field(clazz, field_name, new_value): ...
+```
+
+--------------------------------------------------
+35.10 Реконструкция markdown_utils из markdown_utils.pyc
+--------------------------------------------------
+
+```py
+class TLEntityType:
+    CODE = "code"
+    PRE = "pre"
+    STRIKETHROUGH = "strikethrough"
+    TEXT_LINK = "text_link"
+    BOLD = "bold"
+    ITALIC = "italic"
+    UNDERLINE = "underline"
+    SPOILER = "spoiler"
+    CUSTOM_EMOJI = "custom_emoji"
+
+
+class RawEntity:
+    type
+    offset
+    length
+    language = None
+    url = None
+    document_id = None
+
+    def to_tlrpc_object(self): ...
+
+
+class ParsedMessage:
+    text
+    entities
+
+
+def count_chars_until(string, stop_chars, start_index): ...
+def get_utf16_code_unit_offset(text, python_char_index): ...
+def parse_markdown(markdown): ...
+```
+
+--------------------------------------------------
+35.11 Реконструкция ui.settings из ui/settings.pyc
+--------------------------------------------------
+
+```py
+class Switch:
+    key
+    text
+    default
+    subtext = None
+    icon = None
+    on_change = None
+    on_long_click = None
+    link_alias = None
+
+
+class Selector:
+    key
+    text
+    default
+    items
+    icon = None
+    on_change = None
+    on_long_click = None
+    link_alias = None
+
+
+class Input:
+    key
+    text
+    default = ""
+    subtext = None
+    icon = None
+    on_change = None
+    on_long_click = None
+    link_alias = None
+
+
+class Text:
+    text
+    icon = None
+    accent = False
+    red = False
+    on_click = None
+    create_sub_fragment = None
+    on_long_click = None
+    link_alias = None
+
+
+class Header:
+    text
+
+
+class Divider:
+    text = None
+
+
+class EditText:
+    key
+    hint
+    default = ""
+    multiline = False
+    max_length = 256
+    mask = None
+    on_change = None
+```
+
+--------------------------------------------------
+35.12 Реконструкция ui.alert из ui/alert.pyc
+--------------------------------------------------
+
+```py
+class AlertDialogBuilder:
+    ALERT_TYPE_MESSAGE = 0
+    ALERT_TYPE_LOADING = 2
+    ALERT_TYPE_SPINNER = 3
+
+    BUTTON_POSITIVE = -1
+    BUTTON_NEGATIVE = -2
+    BUTTON_NEUTRAL = -3
+
+    def __init__(self, context, progress_style=ALERT_TYPE_MESSAGE, resources_provider=None): ...
+    def get_context(self): ...
+    def set_title(self, title): ...
+    def set_message(self, message): ...
+    def set_message_text_view_clickable(self, clickable): ...
+    def set_positive_button(self, text, listener=None): ...
+    def set_negative_button(self, text, listener=None): ...
+    def set_neutral_button(self, text, listener=None): ...
+    def make_button_red(self, button_type): ...
+    def set_on_back_button_listener(self, listener): ...
+    def set_view(self, view, height=-2): ...
+    def set_items(self, items, listener=None, icons=None): ...
+    def set_on_dismiss_listener(self, listener): ...
+    def set_on_cancel_listener(self, listener): ...
+    def set_top_image(self, res_id, background_color): ...
+    def set_top_drawable(self, drawable, background_color): ...
+    def set_top_animation(self, res_id, size, auto_repeat, background_color, layer_colors=None): ...
+    def set_top_animation_is_new(self, is_new): ...
+    def set_dim_enabled(self, enabled): ...
+    def set_dialog_button_color_key(self, theme_key): ...
+    def set_blurred_background(self, blur, blur_behind_if_possible=True): ...
+    def create(self): ...
+    def show(self): ...
+    def dismiss(self): ...
+    def get_dialog(self): ...
+    def get_button(self, button_type): ...
+    def set_progress(self, progress): ...
+    def set_cancelable(self, cancelable): ...
+    def set_canceled_on_touch_outside(self, cancel): ...
+```
+
+--------------------------------------------------
+35.13 Реконструкция ui.bulletin из ui/bulletin.pyc
+--------------------------------------------------
+
+```py
+class BulletinHelper:
+    DURATION_SHORT = 1500
+    DURATION_LONG = 2750
+    DURATION_PROLONG = 5000
+
+    @classmethod
+    def show_info(cls, message, fragment=None): ...
+
+    @classmethod
+    def show_error(cls, message, fragment=None): ...
+
+    @classmethod
+    def show_success(cls, message, fragment=None): ...
+
+    @classmethod
+    def show_simple(cls, text, icon_res_id, fragment=None): ...
+
+    @classmethod
+    def show_two_line(cls, title, subtitle, icon_res_id, fragment=None): ...
+
+    @classmethod
+    def show_with_button(cls, text, icon_res_id, button_text, on_click, fragment=None, duration=DURATION_PROLONG): ...
+
+    @classmethod
+    def show_undo(cls, text, on_undo, on_action=None, subtitle=None, fragment=None): ...
+
+    @classmethod
+    def show_copied_to_clipboard(cls, message=None, fragment=None): ...
+
+    @classmethod
+    def show_link_copied(cls, is_private_link_info=False, fragment=None): ...
+
+    @classmethod
+    def show_file_saved_to_gallery(cls, is_video=False, amount=1, fragment=None): ...
+
+    @classmethod
+    def show_file_saved_to_downloads(cls, file_type_enum_name="UNKNOWN", amount=1, fragment=None): ...
+```
+
+--------------------------------------------------
+35.14 Реконструкция utils.metadata_parser из metadata_parser.pyc
+--------------------------------------------------
+
+```py
+def get_metadata(file_path):
+    # использует open(..., encoding="utf-8")
+    # читает source
+    # делает ast.parse(...)
+    # проходит по верхнеуровневым Assign
+    # принимает Name = Constant
+    ...
+```
+
+--------------------------------------------------
+35.15 Вставки из dex: plugin system на Java-стороне
+--------------------------------------------------
+
+Из `classes*.dex` подтверждены следующие строки:
+
+```text
+com.exteragram.messenger.plugins.Plugin
+com.exteragram.messenger.plugins.PluginsController
+com.exteragram.messenger.plugins.hooks.PluginsHooks
+com.exteragram.messenger.plugins.hooks.MenuItemRecord
+com.exteragram.messenger.plugins.models.SettingItem
+com.exteragram.messenger.plugins.ui.PluginsActivity
+com.exteragram.messenger.plugins.ui.components.PluginCell
+com.exteragram.messenger.plugins.ui.components.PluginsMenuWrapper
+com.exteragram.messenger.plugins.utils.MenuContextBuilder
+```
+
+И внутренние plugin-related identifiers:
+
+```text
+pluginMenuItemsUpdated
+pluginSettingsRegistered
+pluginSettingsUnregistered
+pluginsUpdated
+pluginsDir
+pluginsQueue
+pluginsDocumentation
+pluginsSafeMode
+pluginsDevMode
+pluginsDeveloperMode
+plugin_enabled_
+```
+
+Это можно прямо использовать как доказательство для ИИ:
+- plugin system в ExteraGram не “внешний промпт”, а реальный встроенный subsystem
+- menu/settings/hooks связаны с Java-side controller
+- safe mode и queue infrastructure существуют
+
+--------------------------------------------------
+35.16 Как использовать эти вставки правильно
+--------------------------------------------------
+
+Если другая ИИ сомневается, что метод или модуль настоящий:
+- покажи ей секции 35.3-35.15
+- скажи, что это восстановлено из `app.imy` и `classes*.dex`
+- требуй, чтобы она не выходила за пределы этого API
+
+Иными словами:
+- секции 1-32 говорят, как писать плагин
+- секции 33-35 доказывают, почему этим правилам можно доверять
+
+--------------------------------------------------
+35.17 Почти-буквальные тела методов из bytecode
+--------------------------------------------------
+
+Ниже не исходный `.py`, а восстановленный квази-код по `co_varnames`, `co_names`, `co_consts` и структуре вызовов. Это можно показывать другой ИИ как “почти literal” фрагменты из движка ExteraGram.
+
+### BasePlugin.add_on_send_message_hook
+
+```py
+def add_on_send_message_hook(self, priority=0):
+    return self.add_hook(PluginsConstants.SEND_MESSAGE_HOOK, False, priority)
+```
+
+Почему это важно:
+- send-message hook регистрируется не отдельным скрытым API
+- он идёт через тот же `add_hook`, просто с константой `SEND_MESSAGE_HOOK`
+
+### BasePlugin.get_setting / set_setting / import_settings / export_settings
+
+```py
+def get_setting(self, key, default=None):
+    return plugin_settings.get_setting(self.id, key, default)
+
+
+def set_setting(self, key, value, reload_settings=False):
+    plugin_settings.set_setting(self.id, key, value)
+    if reload_settings:
+        PluginsController.getInstance().loadPluginSettings(self.id)
+
+
+def export_settings(self):
+    return plugin_settings.get_all_settings(self.id)
+
+
+def import_settings(self, settings, reload_settings=True):
+    plugin_settings.set_all_settings(self.id, settings)
+    if reload_settings:
+        PluginsController.getInstance().loadPluginSettings(self.id)
+```
+
+Что это доказывает:
+- настройки реально живут в `plugin_settings`
+- `reload_settings` не магия, а явный вызов `PluginsController.loadPluginSettings`
+
+### BasePlugin.add_menu_item
+
+Почти-буквальная схема сборки payload:
+
+```py
+def add_menu_item(self, menu_item_data):
+    payload = {
+        PluginsConstants.MenuItemProperties.MENU_TYPE: menu_item_data.menu_type.value,
+        PluginsConstants.MenuItemProperties.TEXT: menu_item_data.text,
+        PluginsConstants.MenuItemProperties.ON_CLICK: menu_item_data.on_click,
+        PluginsConstants.MenuItemProperties.ITEM_ID: menu_item_data.item_id,
+        PluginsConstants.MenuItemProperties.ICON: menu_item_data.icon,
+        PluginsConstants.MenuItemProperties.SUBTEXT: menu_item_data.subtext,
+        PluginsConstants.MenuItemProperties.CONDITION: menu_item_data.condition,
+        PluginsConstants.MenuItemProperties.PRIORITY: menu_item_data.priority,
+    }
+    PluginsController.getInstance().addMenuItem(self.id, payload)
+```
+
+Что это доказывает:
+- `MenuItemData` реально конвертируется в Java-side map
+- поля `item_id`, `icon`, `subtext`, `condition`, `priority` не выдуманы
+- `menu_type` используется через `.value`
+
+### BasePlugin.remove_menu_item
+
+```py
+def remove_menu_item(self, item_id):
+    return PluginsController.getInstance().removeMenuItem(self.id, item_id)
+```
+
+### BasePlugin.hook_method / hook_all_methods / hook_all_constructors
+
+```py
+def hook_method(self, method_or_constructor, xposed_hook, priority=0):
+    if xposed_hook is None:
+        raise TypeError("xposed_hook cannot be None")
+    if ExteraConfig.pluginsSafeMode:
+        return None
+    java_cb = self.__get_java_callback_instance(xposed_hook, priority)
+    unhook = XposedBridge.hookMethod(method_or_constructor, java_cb)
+    PluginsController.getInstance().addXposedHook(self.id, unhook)
+    return unhook
+```
+
+```py
+def hook_all_methods(self, hook_class, method_name, xposed_hook, priority=0):
+    if xposed_hook is None or method_name is None:
+        raise TypeError("xposed_hook and method_name cannot be None")
+    if ExteraConfig.pluginsSafeMode:
+        return []
+    unhooks = XposedBridge.hookAllMethods(hook_class, method_name, self.__get_java_callback_instance(xposed_hook, priority))
+    PluginsController.getInstance().addXposedHooks(self.id, list(unhooks))
+    return unhooks
+```
+
+```py
+def hook_all_constructors(self, hook_class, xposed_hook, priority=0):
+    if xposed_hook is None:
+        raise TypeError("xposed_hook cannot be None")
+    if ExteraConfig.pluginsSafeMode:
+        return []
+    unhooks = XposedBridge.hookAllConstructors(hook_class, self.__get_java_callback_instance(xposed_hook, priority))
+    PluginsController.getInstance().addXposedHooks(self.id, list(unhooks))
+    return unhooks
+```
+
+Что это доказывает:
+- Xposed-hooks реально поддерживаются из Python side
+- safe mode может их блокировать
+- unhook objects регистрируются в `PluginsController`
+
+### client_utils.send_text
+
+```py
+def send_text(peer, text, **kwargs):
+    params = {"peer": peer, "message": text}
+    params.update(kwargs)
+    return send_message(params)
+```
+
+### client_utils.send_photo / send_document / send_video / send_audio
+
+```py
+def send_photo(peer, file_path, caption="", high_quality=False, **kwargs):
+    photo = _generate_photo_sizes(file_path)
+    if photo is None:
+        log("Failed to create photo object for " + file_path)
+        return
+    params = {"peer": peer, "photo": photo, "message": caption, "sendingHighQuality": high_quality}
+    params.update(kwargs)
+    return send_message(params)
+```
+
+```py
+def send_document(peer, file_path, caption="", **kwargs):
+    document = _prepare_document(file_path)
+    if document is None:
+        log("Failed to prepare document for " + file_path)
+        return
+    params = {"peer": peer, "document": document, "message": caption}
+    params.update(kwargs)
+    return send_message(params)
+```
+
+```py
+def send_video(peer, file_path, caption="", **kwargs):
+    document = _prepare_document(file_path, mime_type="video/mp4")
+    if document is None:
+        log("Failed to prepare video document for " + file_path)
+        return
+    _add_video_attributes(document, file_path)
+    params = {"peer": peer, "document": document, "message": caption}
+    params.update(kwargs)
+    return send_message(params)
+```
+
+```py
+def send_audio(peer, file_path, caption="", **kwargs):
+    document = _prepare_document(file_path, mime_type="audio/mpeg")
+    if document is None:
+        log("Failed to prepare audio document for " + file_path)
+        return
+    _add_audio_attributes(document, file_path)
+    params = {"peer": peer, "document": document, "message": caption}
+    params.update(kwargs)
+    return send_message(params)
+```
+
+### client_utils.send_message
+
+Почти-буквальная карта дефолтов:
+
+```py
+def send_message(params):
+    defaults = {
+        "peer": 0,
+        "message": None,
+        "photo": None,
+        "document": None,
+        "videoEditedInfo": None,
+        "path": None,
+        "replyToMsg": None,
+        "replyToTopMsg": None,
+        "entities": None,
+        "replyMarkup": None,
+        "params": None,
+        "searchLinks": True,
+        "notify": True,
+        "updateStickersOrder": False,
+        "hasMediaSpoilers": False,
+        "invert_media": False,
+        "sendingHighQuality": False,
+    }
+    final_params = defaults.copy()
+    final_params.update(params)
+    ...
+    helper = get_send_messages_helper()
+    run_on_ui_thread(...)
+```
+
+Это особенно важно для ИИ:
+- `send_message` не принимает произвольный мусорный dict “на удачу”
+- у него есть конкретный набор ожидаемых ключей
+- `sendingHighQuality`, `hasMediaSpoilers`, `invert_media` реально существуют
+
+### client_utils.edit_message
+
+```py
+def edit_message(message_obj, text=None, file_path=None, with_spoiler=False, **kwargs):
+    if not isinstance(message_obj, MessageObject):
+        log("'message_obj' must be a valid MessageObject instance.")
+        return
+    if text is None and file_path is None:
+        log("edit_message called with no changes (text or file_path). Cancelled.")
+        return
+    ...
+    helper = get_send_messages_helper()
+    helper.editingMessage = message_obj
+    helper.editingMessageEntities = ...
+    run_on_ui_thread(...)
+```
+
+Это доказывает:
+- `edit_message` не абстрактный helper, а реальная интеграция с Telegram-side `SendMessagesHelper`
+- media edit path действительно поддержан
+
+--------------------------------------------------
+35.18 Сырые evidence tuples из code objects
+--------------------------------------------------
+
+Если другой ИИ нужен уже почти “forensics level” evidence, можно дать ей эти сырые данные. Это прямые результаты introspection по `.pyc`.
+
+### BasePlugin.add_hook
+
+```py
+co_varnames = ('self', 'name', 'match_substring', 'priority')
+co_names = ('id', 'error_message', 'PluginsController', 'getInstance', 'addEventHook')
+```
+
+Вывод:
+- `add_hook` принимает имя hook-а, `match_substring` и `priority`
+- внутри реально зовёт `PluginsController.getInstance().addEventHook(...)`
+
+### BasePlugin.add_on_send_message_hook
+
+```py
+co_varnames = ('self', 'priority')
+co_consts = (None, False)
+co_names = ('add_hook', 'PluginsConstants', 'SEND_MESSAGE_HOOK')
+```
+
+Вывод:
+- send hook строится на `add_hook`
+- в аргументы реально подставляется `False`
+- используется константа `PluginsConstants.SEND_MESSAGE_HOOK`
+
+### BasePlugin.set_setting
+
+```py
+co_varnames = ('self', 'key', 'value', 'reload_settings')
+co_names = (
+    'id',
+    'error_message',
+    'plugin_settings',
+    'set_setting',
+    'PluginsController',
+    'getInstance',
+    'loadPluginSettings',
+)
+```
+
+Вывод:
+- настройки идут через `plugin_settings.set_setting`
+- UI/settings reload идёт через `loadPluginSettings`
+
+### BasePlugin.add_menu_item
+
+```py
+co_varnames = ('self', 'menu_item_data')
+co_names = (
+    'id',
+    'error_message',
+    'PluginsController',
+    'getInstance',
+    'addMenuItem',
+    'PluginsConstants',
+    'MenuItemProperties',
+    'MENU_TYPE',
+    'menu_type',
+    'value',
+    'TEXT',
+    'text',
+    'ON_CLICK',
+    'on_click',
+    'ITEM_ID',
+    'item_id',
+    'ICON',
+    'icon',
+    'SUBTEXT',
+    'subtext',
+    'CONDITION',
+    'condition',
+    'PRIORITY',
+    'priority',
+)
+```
+
+Вывод:
+- перечисление `MenuItemProperties.*` подтверждено
+- все ключевые поля menu item реально читаются поимённо
+
+### client_utils.send_message
+
+```py
+co_varnames = ('params', 'defaults', 'final_params', 'cast_to_array_list', 'key', 'value', 'e')
+co_names = ('get_send_messages_helper', 'SendMessageParams', 'copy', 'update', 'items', 'setattr', 'Exception', 'log', 'run_on_ui_thread')
+co_consts = (
+    None,
+    'peer',
+    0,
+    'message',
+    'photo',
+    'document',
+    'videoEditedInfo',
+    'path',
+    'replyToMsg',
+    'replyToTopMsg',
+    'entities',
+    'replyMarkup',
+    'params',
+    'searchLinks',
+    True,
+    'notify',
+    'updateStickersOrder',
+    False,
+    'hasMediaSpoilers',
+    'invert_media',
+    'sendingHighQuality',
+    \"Could not set parameter '\",
+    \"': \",
+)
+```
+
+Вывод:
+- `SendMessageParams` существует внутри реального client API
+- параметры выставляются через `setattr`
+- unsupported key приводит к log с текстом `Could not set parameter ...`
+
+### client_utils.edit_message
+
+```py
+co_varnames = ('message_obj', 'text', 'file_path', 'with_spoiler', 'kwargs', 'ext', 'key', 'value', 'e')
+co_names = (
+    'isinstance',
+    'MessageObject',
+    'log',
+    'os',
+    'path',
+    'exists',
+    'get_send_messages_helper',
+    'editingMessage',
+    'editingMessageEntities',
+    'splitext',
+    'lower',
+    '_generate_photo_sizes',
+    '_prepare_document',
+    '_add_video_attributes',
+    '_add_audio_attributes',
+    'HashMap',
+    'items',
+    'put',
+    'str',
+    'run_on_ui_thread',
+    'getId',
+    'getDialogId',
+    'Exception',
+    'traceback',
+    'format_exc',
+)
+```
+
+Вывод:
+- в edit path реально участвуют `MessageObject`, `HashMap`, `editingMessage`, `editingMessageEntities`
+- поддержаны photo/document/video/audio edit cases
+
+### ui.settings dataclasses
+
+```py
+Switch.co_consts   = ('Switch', 'key', 'text', 'default', None, 'subtext', 'icon', False, 'on_change', 'type', 'on_long_click', 'link_alias')
+Selector.co_consts = ('Selector', 'key', 'text', 'default', 'items', None, 'icon', False, 'on_change', 'type', 'on_long_click', 'link_alias')
+Input.co_consts    = ('Input', 'key', 'text', '', 'default', None, 'subtext', 'icon', False, 'on_change', 'type', 'on_long_click', 'link_alias')
+Text.co_consts     = ('Text', 'text', None, 'icon', False, 'accent', 'red', 'on_click', 'create_sub_fragment', 'type', 'on_long_click', 'link_alias')
+Header.co_consts   = ('Header', 'text', False, 'type', None)
+Divider.co_consts  = ('Divider', None, 'text', False, 'type')
+EditText.co_consts = ('EditText', 'key', 'hint', '', 'default', False, 'multiline', 256, 'max_length', None, 'mask', 'on_change', 'type')
+```
+
+Вывод:
+- default values подтверждены raw-уровнем
+- `EditText.max_length = 256` и `Input.default = ""` не выдуманы
+
+### ui.alert.AlertDialogBuilder
+
+```py
+co_consts = (
+    'AlertDialogBuilder',
+    0,
+    2,
+    3,
+    -1,
+    -2,
+    -3,
+    None,
+    'context',
+    'progress_style',
+    'resources_provider',
+    'return',
+    'title',
+    'message',
+    'clickable',
+    'text',
+    'listener',
+    'button_type',
+    'view',
+    'height',
+    'items',
+    'icons',
+    'res_id',
+    'background_color',
+    'drawable',
+    'size',
+    'auto_repeat',
+    'layer_colors',
+    'is_new',
+    'enabled',
+    'theme_key',
+    True,
+    'blur',
+    'blur_behind_if_possible',
+    'progress',
+    'cancelable',
+    'cancel',
+)
+```
+
+Вывод:
+- константы кнопок и типов alert подтверждены raw-уровнем
+- builder реально умеет `set_items`, `set_top_animation`, `set_progress`, `set_blurred_background`
+
+### ui.bulletin.BulletinHelper
+
+```py
+co_consts = (
+    'BulletinHelper',
+    1500,
+    2750,
+    5000,
+    None,
+    'fragment',
+    'return',
+    'message',
+    'text',
+    'icon_res_id',
+    'title',
+    'subtitle',
+    'button_text',
+    'on_click',
+    'duration',
+    'on_undo',
+    'on_action',
+    False,
+    'is_private_link_info',
+    1,
+    'is_video',
+    'amount',
+    'UNKNOWN',
+    'file_type_enum_name',
+)
+```
+
+Вывод:
+- durations `1500 / 2750 / 5000` настоящие
+- helper реально умеет undo/button/download/gallery clipboard bulletins
+
+--------------------------------------------------
+35.19 Готовые доказательные вставки для другой ИИ
+--------------------------------------------------
+
+Если ты даёшь этот файл другой ИИ и хочешь, чтобы она уже не спорила с API, можешь прямо писать так:
+
+```text
+Ниже не фанатский мануал, а верифицированная карта ExteraGram plugin engine.
+Она собрана по реальным файлам:
+- assets/chaquopy/build.json
+- assets/chaquopy/app.imy
+- classes*.dex
+
+app.imy содержит:
+- base_plugin.pyc
+- client_utils.pyc
+- file_utils.pyc
+- hook_utils.pyc
+- markdown_utils.pyc
+- ui/alert.pyc
+- ui/bulletin.pyc
+- ui/settings.pyc
+- utils/metadata_parser.pyc
+
+python_version в build.json = 3.11.
+
+В bytecode подтверждены:
+- BasePlugin.add_hook(self, name, match_substring, priority)
+- BasePlugin.add_on_send_message_hook(self, priority)
+- BasePlugin.add_menu_item(self, menu_item_data)
+- client_utils.send_message(params)
+- client_utils.edit_message(message_obj, text=None, file_path=None, with_spoiler=False, **kwargs)
+- MenuItemData fields: menu_type, text, on_click, item_id, icon, subtext, condition, priority
+- HookResult fields: strategy, request, response, update, updates, error, params
+
+В dex подтверждены:
+- com.exteragram.messenger.plugins.PluginsController
+- com.exteragram.messenger.plugins.hooks.MenuItemRecord
+- com.exteragram.messenger.plugins.models.SettingItem
+- com.exteragram.messenger.plugins.ui.PluginsActivity
+```
+
+Такой блок обычно достаточно жёсткий, чтобы вторая ИИ перестала придумывать несуществующий API и писала плагин строго под реальный ExteraGram runtime.
+
+==================================================
+36. FIELD-TESTED PATTERNS FROM REAL PLUGIN CORPUS
+==================================================
+
+Этот раздел собран не из `app.imy`, а из папки с 251 реальным `.plugin` файлом.
+
+Очень важное правило доверия:
+- секции 1-35 = canonical runtime spec + evidence from ExteraGram itself
+- секция 36 = field-tested community patterns
+- если corpus конфликтует с `app.imy`, верь `app.imy`
+- если corpus показывает полезный приём, который не противоречит runtime, его можно использовать
+
+--------------------------------------------------
+36.1 Объём и смысл corpus
+--------------------------------------------------
+
+Проверено:
+- `251` plugin-файл из `/storage/emulated/0/Download/плагины`
+
+Зачем это нужно:
+- показывает, какие техники реально используют авторы плагинов
+- помогает понять, какие hooks/menu/settings/audio-паттерны живут в бою
+- даёт примеры не только “официального API”, но и практического стиля кода
+
+Но:
+- corpus содержит шум
+- corpus содержит кастомные библиотеки
+- corpus содержит плохие type hints и неканоничные enum values
+- нельзя слепо копировать любой найденный код
+
+--------------------------------------------------
+36.2 Самые частые модули и imports
+--------------------------------------------------
+
+Наиболее частые import-модули в corpus:
+
+```text
+base_plugin                         256
+android_utils                       221
+client_utils                        196
+ui.settings                         186
+org.telegram.messenger              174
+ui.bulletin                         161
+java.util                           122
+hook_utils                          121
+ui.alert                             97
+org.telegram.tgnet                   90
+com.exteragram.messenger.plugins     39
+com.exteragram.messenger.plugins.ui  27
+android.media                        10
+file_utils                            8
+```
+
+Самые частые импортируемые имена:
+
+```text
+BasePlugin             246
+Header                 174
+run_on_ui_thread       167
+log                    163
+BulletinHelper         161
+Divider                155
+Switch                 150
+HookResult             146
+HookStrategy           140
+get_last_fragment      140
+Input                  127
+Text                   109
+find_class             106
+AlertDialogBuilder      97
+MenuItemData            89
+MenuItemType            88
+Selector                85
+TLRPC                   84
+MethodHook              70
+ArrayList               70
+Locale                  69
+dynamic_proxy           64
+AndroidUtilities        61
+send_message            55
+run_on_queue            55
+```
+
+Практический вывод для ИИ:
+- базовый стек плагинов почти всегда строится вокруг `BasePlugin`, `client_utils`, `android_utils`, `ui.settings`, `ui.bulletin`
+- прямые imports из `org.telegram.*`, `android.*`, `java.*` очень распространены
+- это допустимо, но риск совместимости выше, чем у core helper API
+
+--------------------------------------------------
+36.3 Самые частые callbacks и жизненный цикл
+--------------------------------------------------
+
+В corpus чаще всего встречаются:
+
+```text
+on_plugin_load         252
+create_settings        192
+on_plugin_unload       149
+on_send_message_hook   130
+on_app_event             встречается реже, но реально используется
+
+before_hooked_method   245
+after_hooked_method    214
+replace_hooked_method   49
+```
+
+Вывод:
+- для обычного user-facing plugin самый типичный каркас:
+  - `on_plugin_load`
+  - `create_settings`
+  - `on_plugin_unload`
+- для command/autoflow plugins часто добавляют:
+  - `add_on_send_message_hook()`
+  - `on_send_message_hook(self, account, params)`
+- для Xposed-style UI hacks часто используют:
+  - `class SomeHook(MethodHook)`
+  - `before_hooked_method`
+  - `after_hooked_method`
+
+Наблюдение по class name:
+- в corpus много плагинов с классами вроде `PremiumFeaturesPlugin(BasePlugin)` или `ListenMessageTTSPlugin(BasePlugin)`
+- однако безопасный canonical template в этой инструкции остаётся: `class Plugin(BasePlugin):`
+- если нет особой причины, используй именно `Plugin`
+
+--------------------------------------------------
+36.4 Menu patterns, context keys и settings buttons
+--------------------------------------------------
+
+Частота menu types в corpus:
+
+```text
+CHAT_ACTION_MENU       68
+DRAWER_MENU            31
+MESSAGE_CONTEXT_MENU   23
+PROFILE_ACTION_MENU     8
+```
+
+Частые `context.get(...)` keys в callback-ах menu item:
+
+```text
+dialog_id
+message
+fragment
+user
+drawer_layout
+context
+chatId
+chat
+type
+uri
+account
+```
+
+Практический вывод:
+- для message action ожидай прежде всего `message`
+- для chat action часто нужен `fragment`
+- для profile action можно ожидать `user`
+- не завязывайся на один key без fallback
+
+Живой menu-pattern из `downloader.plugin`:
+
+```py
+self._drawer_settings_item = self.add_menu_item(MenuItemData(
+    menu_type=MenuItemType.DRAWER_MENU,
+    text=Z("settings_title"),
+    icon="msg_settings_14",
+    priority=5,
+    on_click=lambda ctx: run_on_ui_thread(
+        lambda: self._open_plugin_settings(
+            PluginsController.getInstance().plugins.get(self.id)
+        )
+    )
+))
+
+self._chat_settings_item = self.add_menu_item(MenuItemData(
+    menu_type=MenuItemType.CHAT_ACTION_MENU,
+    text=Z("settings_title"),
+    icon="msg_settings_14",
+    priority=5,
+    on_click=lambda ctx: run_on_ui_thread(
+        lambda: self._open_plugin_settings(
+            PluginsController.getInstance().plugins.get(self.id)
+        )
+    )
+))
+```
+
+Живой message-context pattern из `listen_message_tts.plugin`:
+
+```py
+self._menu_id = self.add_menu_item(MenuItemData(
+    menu_type=MenuItemType.MESSAGE_CONTEXT_MENU,
+    text="Прослушать",
+    icon="msg_voice",
+    on_click=self._on_listen_click,
+    condition="message != null && ((message.messageText != null && message.messageText.length() > 0) || message.caption != null)",
+    priority=1000
+))
+```
+
+Рекомендации:
+- для кнопки “открыть настройки плагина” чаще всего подходят `DRAWER_MENU` и `CHAT_ACTION_MENU`
+- для действий над сообщением используй `MESSAGE_CONTEXT_MENU`
+- если нужен показ/скрытие, используй `condition`
+- если сохраняешь `item_id`, удаляй menu item в `on_plugin_unload`
+
+--------------------------------------------------
+36.5 Send hook patterns из живых плагинов
+--------------------------------------------------
+
+Частота:
+
+```text
+add_on_send_message_hook   встречается в 131 файле
+send_message               встречается в 142 файлах
+send_request               встречается в 44 файлах
+parse_markdown             встречается в 49 файлах
+```
+
+Часто используемые поля `params` в corpus:
+
+```text
+message
+peer
+entities
+replyToMsg
+replyToTopMsg
+caption
+document
+photo
+path
+```
+
+Главный practical pattern:
+- перехватить `.command`
+- запустить фоновой worker/thread
+- показать loading UI
+- отменить оригинальную отправку через `HookResult(strategy=HookStrategy.CANCEL)`
+
+Живой пример из `downloader.plugin`:
+
+```py
+def on_send_message_hook(self, account, params):
+    if not hasattr(params, "message") or not isinstance(params.message, str):
+        return HookResult()
+
+    msg = params.message.strip()
+
+    if msg.startswith(".down ") or msg.startswith(".dl "):
+        if self._task_in_progress.locked():
+            BulletinHelper.show_error("Another download is already running")
+            return HookResult(strategy=HookStrategy.CANCEL)
+
+        thread = threading.Thread(
+            target=self._process_download_and_send,
+            args=(url, dialog_id, notify, schedule_date, mode_override, params.replyToMsg, params.replyToTopMsg),
+            daemon=True
+        )
+        thread.start()
+
+        run_on_ui_thread(lambda: self._show_loading_alert())
+        return HookResult(strategy=HookStrategy.CANCEL)
+
+    return HookResult()
+```
+
+Ещё один живой pattern из `tailed-tts.plugin`:
+
+```py
+def on_send_message_hook(self, account, params):
+    if not isinstance(params.message, str) or not params.message.startswith(".tts"):
+        return HookResult()
+
+    text = ' '.join(params.message.strip().split()[1:])
+    if len(text) == 0:
+        BulletinHelper.show_info("usage...")
+        return HookResult(strategy=HookStrategy.CANCEL, params=params)
+
+    self.params = params
+    threading.Thread(target=self.handle_tts, daemon=True).start()
+    return HookResult(strategy=HookStrategy.CANCEL, params=params)
+```
+
+Очень важное замечание:
+- в corpus встречаются плохие type hints
+- например, один plugin может аннотировать `on_send_message_hook(...) -> HookStrategy`, но реально возвращать `HookResult`
+- в таких случаях доверяй runtime spec, а не аннотации автора plugin-а
+
+--------------------------------------------------
+36.6 Xposed-style hooks в боевых плагинах
+--------------------------------------------------
+
+Частота:
+
+```text
+hook_method            103 файлов
+hook_all_methods        12 файлов
+hook_all_constructors    2 файла
+
+MethodHook             76 файлов
+MethodReplacement      21 файлов
+hook_filters            8 файлов
+HookFilter              8 файлов
+XposedHook              7 файлов
+```
+
+Практический вывод:
+- `hook_method` + `MethodHook` это основной advanced pattern
+- `hook_all_methods` и `hook_all_constructors` редкие, более рискованные, но реальные
+- `hook_filters` используется редко, но полезен для узкой фильтрации callback execution
+
+Минимальный живой pattern из `MD3.plugin`:
+
+```py
+class DialogShowHook(MethodHook):
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    def after_hooked_method(self, param):
+        if not self.plugin.get_setting("replace_global", True):
+            return
+        dialog = param.thisObject
+        ...
+
+self.hook = self.hook_method(method, DialogShowHook(self))
+...
+self.unhook_method(self.hook)
+```
+
+Живой filtered pattern из `zodiac_indicator.plugin`:
+
+```py
+class SettingsStyleHook(MethodHook):
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    @hook_filters(HookFilter.ArgumentNotNull(0))
+    def after_hooked_method(self, param):
+        text = str(param.args[0] or "").strip()
+        ...
+```
+
+Рекомендации:
+- если нужно изменить один конкретный метод, используй `hook_method`
+- если нужен массовый перехват по имени, только тогда `hook_all_methods`
+- если сохраняешь unhook handle, снимай hook при unload
+- Xposed hooks делай только если обычные menu/send/settings API не решают задачу
+
+--------------------------------------------------
+36.7 Sound, vibration, TTS и audio patterns
+--------------------------------------------------
+
+В corpus звуковые/аудио-сущности встречаются так:
+
+```text
+AudioManager      7
+VibrationEffect   5
+Vibrator          4
+tts               4
+MediaPlayer       2
+TextToSpeech      2
+ToneGenerator     1
+RingtoneManager   1
+SoundPool         1
+```
+
+Это значит:
+- звук и вибрация в плагинах реально делаются
+- но это не core plugin helper API, а Android-side pattern
+- использовать можно, но осторожно
+
+### Самый простой sound-pattern: ToneGenerator
+
+Живой пример из `premium.plugin`:
+
+```py
+from android.media import AudioManager, ToneGenerator
+
+try:
+    tg = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100)
+    tg.startTone(ToneGenerator.TONE_PROP_BEEP)
+except Exception:
+    pass
+```
+
+Когда использовать:
+- короткий beep
+- no external assets
+- нужна простая системная индикация
+
+### TTS-pattern: системный TextToSpeech
+
+Живой pattern из `listen_message_tts.plugin`:
+
+```py
+TextToSpeech = find_class("android.speech.tts.TextToSpeech")
+OnInitListener = find_class("android.speech.tts.TextToSpeech$OnInitListener")
+
+class _OnInit(dynamic_proxy(OnInitListener)):
+    def __init__(self, cb):
+        super().__init__()
+        self.cb = cb
+
+    def onInit(self, status):
+        self.cb(status)
+```
+
+И затем:
+
+```py
+_TTSState.tts = TextToSpeech(ctx, listener, GOOGLE_TTS_PKG)
+_TTSState.tts.setLanguage(Locale.getDefault())
+_TTSState.tts.speak(text, TextToSpeech.QUEUE_FLUSH, None, "extera_tts_msg")
+```
+
+Когда использовать:
+- нужно озвучивание текста
+- не хочешь внешний API
+- готов работать с Android TTS lifecycle
+
+### Vibration pattern
+
+Живые варианты из corpus:
+
+```py
+VibrationEffect = find_class("android.os.VibrationEffect")
+vib.vibrate(VibrationEffect.createOneShot(1300, 255))
+```
+
+или:
+
+```py
+if Build.VERSION.SDK_INT >= 26:
+    vibrator.vibrate(VibrationEffect.createOneShot(duration, amp))
+```
+
+Когда использовать:
+- tactile feedback
+- уведомление, подтверждение действия
+
+### Notification ringtone pattern
+
+Живой pattern из `Translatica.plugin`:
+
+```py
+from android.media import RingtoneManager
+uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+ringtone = RingtoneManager.getRingtone(ctx, uri)
+ringtone.play()
+```
+
+### Advanced audio patterns
+
+В больших plugins встречаются:
+- `MediaPlayer`
+- `SoundPool`
+- `AudioManager`
+
+Используй их только если действительно нужен:
+- playback from file/resource
+- stream volume control
+- advanced sound customization
+
+Если тебе просто нужен “агрессивный звук”, safest order такой:
+1. `ToneGenerator`
+2. `VibrationEffect`
+3. `RingtoneManager`
+4. `MediaPlayer`
+5. `SoundPool`
+
+--------------------------------------------------
+36.8 Реальные add_hook names из corpus
+--------------------------------------------------
+
+В `add_hook("...")` реально встречались строки:
+
+```text
+TL_messages_forwardMessages
+TL_updateNewMessage
+TL_updateNewChannelMessage
+TL_messages_sendMedia
+TL_payments_sendStarsForm
+TL_updateShortMessage
+TL_updateShort
+TL_updateShort
+TL_updates
+TL_updatesCombined
+getStarGifts
+updateNewMessage
+updateNewChannelMessage
+StarGift
+Gifts
+```
+
+Как это использовать:
+- считай эти имена примерами, а не полным списком
+- update/request hooks часто завязаны на TL names
+- если нужен update hook, ищи ближайший реальный TL name и работай консервативно
+
+--------------------------------------------------
+36.9 Corpus noise: что нельзя копировать вслепую
+--------------------------------------------------
+
+Самая важная часть.
+
+### Не верь любым HookStrategy из corpus
+
+Runtime-confirmed значения:
+
+```text
+DEFAULT
+CANCEL
+MODIFY
+MODIFY_FINAL
+```
+
+Но в corpus встречаются шумные значения:
+
+```text
+NONE
+REPLACE
+CONTINUE
+BLOCK
+SKIP
+C
+```
+
+Правило:
+- не используй их, если они не подтверждены runtime spec
+- они могут быть ошибкой автора, кастомным shim-ом, dead code или несовместимой версией
+
+### Не делай внешние зависимости default-выбором
+
+В corpus встречаются:
+- `PIL`
+- `requests`
+- `packaging.version`
+- `typing_extensions`
+- разные вспомогательные lib plugins
+
+Также встречаются кастомные library plugins:
+- `mandre_lib.plugin`
+- `zwyLib.plugin`
+- `cactusLibMini.plugin`
+
+Правило:
+- не завязывай новый plugin на эти библиотеки по умолчанию
+- используй их только если пользователь явно просит совместимость с конкретной ecosystem
+- canonical safe path: core ExteraGram API + Android/Telegram classes
+
+### Не копируй монолитную архитектуру больших plugins
+
+Крупные файлы вроде:
+- `nowfy.plugin`
+- `UiTweaks.plugin`
+- `Translatica.plugin`
+- `mandre_lib.plugin`
+
+полезны как reference, но плохи как базовый template для нового плагина.
+
+Лучший подход:
+- бери оттуда только отдельный pattern
+- не копируй весь стиль, framework и слои абстракций
+
+--------------------------------------------------
+36.10 Как ИИ должна использовать section 36
+--------------------------------------------------
+
+Алгоритм:
+1. Сначала опирайся на секции 1-35.
+2. Затем используй section 36 для выбора “какой pattern реально популярен в живых plugins”.
+3. Если нужен sound/TTS/vibration, бери pattern из 36.7.
+4. Если нужен UI hack, смотри 36.6.
+5. Если нужен menu/settings entrypoint, смотри 36.4.
+6. Если нужен command/autoreply/autoprocessing flow, смотри 36.5.
+7. Если corpus даёт сомнительный enum, странную type annotation или внешнюю lib, игнорируй это и возвращайся к runtime spec.
+
+Коротко:
+- sections 1-35 = what is real in ExteraGram
+- section 36 = what real plugin authors actually do
+- combining both layers gives the best prompt for generating a new plugin from scratch
+
+==================================================
+37. REFRESHED CORPUS PASS: 329 CURRENT PLUGINS
+==================================================
+
+Этот раздел новее section 36 и основан на повторном разборе текущей папки `/storage/emulated/0/Download/плагины`.
+
+Правило:
+- если section 36 и section 37 расходятся в числах, считай section 37 более свежим
+- section 36 полезен как набор patterns и объяснений
+- section 37 полезен как более актуальная статистика и дополнительные текущие примеры
+
+--------------------------------------------------
+37.1 Corpus size, duplicates, metadata quality
+--------------------------------------------------
+
+Текущий разбор:
+- `329` plugin-файлов
+
+Важно:
+- в corpus очень много версий, копий и форков
+- это почти “98% всех плагинов” в практическом смысле, но частоты немного искажены дублями
+
+Топ duplicate `__id__`:
+
+```text
+fuck_gifts                    11
+ai_status                      9
+fix_endpoint_gooey             9
+mandre_lib                     9
+MandreTqfy                     8
+templates                      8
+log_overlay_by_rn              7
+ai_assistant_by_mihailkotovski 6
+re_extera_dex                  6
+tgfy                           6
+```
+
+Практический вывод:
+- если один pattern встречается только в одной “семье” версий, не считай его universal
+- особенно осторожно относись к паттернам из `mandre_lib`, `templates`, `ai_status`, `re_extera_dex` и других heavily-duplicated families
+
+Качество metadata:
+- `__id__` и `__name__` есть практически везде
+- `__author__` отсутствует в `30` файлах
+- `__version__` отсутствует в `3` файлах
+
+Это усиливает правило:
+- всегда ставь полный metadata block
+- не копируй плохую практику из файлов без нормальной metadata
+
+--------------------------------------------------
+37.2 Updated import profile
+--------------------------------------------------
+
+Наиболее частые import-модули в текущем corpus:
+
+```text
+base_plugin                         320
+ui.settings                         246
+android_utils                       244
+client_utils                        239
+ui.bulletin                         210
+org.telegram.messenger              196
+hook_utils                          173
+typing                              143
+java                                129
+ui.alert                            126
+java.util                           105
+org.telegram.tgnet                   87
+android.widget                       82
+android.view                         73
+java.io                              68
+java.lang                            67
+markdown_utils                       62
+android.content                      61
+```
+
+Наиболее частые imported names:
+
+```text
+BasePlugin           320
+Header               230
+run_on_ui_thread     214
+BulletinHelper       210
+Divider              206
+log                  198
+get_last_fragment    186
+Input                179
+Switch               176
+HookResult           172
+HookStrategy         161
+find_class           159
+Text                 158
+MethodHook           131
+AlertDialogBuilder   126
+dynamic_proxy        105
+Selector             104
+MenuItemData          96
+MenuItemType          96
+run_on_queue          80
+send_message          62
+parse_markdown        61
+send_request          34
+```
+
+Что это означает для ИИ:
+- `MethodHook` и `hook_method` в текущем corpus уже почти так же важны, как send hooks
+- `ui.settings` используется почти везде
+- `BulletinHelper` и `run_on_ui_thread` это крайне массовые building blocks
+- прямые Java/Android imports стали ещё заметнее, но это по-прежнему более рискованный слой, чем helper API
+
+--------------------------------------------------
+37.3 Updated lifecycle and feature usage
+--------------------------------------------------
+
+Частота top callbacks:
+
+```text
+on_plugin_load       329
+create_settings      258
+on_plugin_unload     195
+on_send_message_hook 150
+after_hooked_method  118
+before_hooked_method 111
+replace_hooked_method 21
+```
+
+Частота top features:
+
+```text
+create_settings          258
+run_on_ui_thread         215
+add_on_send_message_hook 152
+hook_method              151
+MethodHook               139
+threading                110
+dynamic_proxy            109
+run_on_queue             103
+add_menu_item             94
+send_message              93
+parse_markdown            62
+send_request              56
+remove_menu_item          40
+MethodReplacement         22
+VibrationEffect           16
+hook_all_methods          15
+TextToSpeech_or_tts       10
+hook_filters              10
+condition_in_menu          7
+Vibrator                   5
+AudioManager               4
+MediaPlayer                2
+RingtoneManager            1
+ToneGenerator              1
+```
+
+Практический вывод:
+- в новом corpus advanced hook-плагины стали очень заметной частью экосистемы
+- safest baseline всё ещё: settings + menu + send hook
+- но если задача UI-level или Telegram-internals-level, `hook_method` уже реально является mainstream pattern
+
+--------------------------------------------------
+37.4 Updated menu picture
+--------------------------------------------------
+
+Частота menu types в текущем corpus:
+
+```text
+DRAWER_MENU            48
+CHAT_ACTION_MENU       40
+MESSAGE_CONTEXT_MENU   17
+PROFILE_ACTION_MENU     7
+```
+
+Это уже отличается от старого snapshot.
+
+Вывод:
+- для utility/plugins manager/settings entrypoints `DRAWER_MENU` сейчас даже популярнее `CHAT_ACTION_MENU`
+- `CHAT_ACTION_MENU` остаётся сильным вариантом для action-oriented plugins
+- `MESSAGE_CONTEXT_MENU` по-прежнему важен для message tools, но используется заметно реже
+
+Живой current-corpus condition example:
+
+```py
+MenuItemData(
+    menu_type=MenuItemType.MESSAGE_CONTEXT_MENU,
+    text="Проверить плагин",
+    on_click=self._on_menu_check,
+    icon="menu_privacy_policy",
+    item_id="gemini_plugin_check",
+    condition="message != null && message.getDocument() != null && (message.getDocument().file_name_fixed.endsWith('.plugin') || message.getDocument().file_name_fixed.endsWith('.py'))"
+)
+```
+
+Ещё один current-corpus condition example:
+
+```py
+condition='message.isDocument() || message.isPhoto() || message.isVideo() || message.isSticker()'
+```
+
+Rule for AI:
+- `condition` strings полезны, но встречаются редко
+- используй их, только если условие действительно простое и явно зависит от доступного `message`
+
+--------------------------------------------------
+37.5 Updated send-hook picture
+--------------------------------------------------
+
+Частота:
+
+```text
+add_on_send_message_hook   152 файлов
+send_message                93 файла
+send_request                56 файлов
+run_on_queue               103 файла
+```
+
+Часто используемые `params` fields:
+
+```text
+message
+peer
+entities
+replyToMsg
+replyToTopMsg
+caption
+photo
+path
+document
+```
+
+Практический вывод:
+- command-processing и pre-send transformation это один из самых массовых plugin styles
+- `params.message` и `params.peer` являются главными рабочими полями
+- `entities`, `replyToMsg`, `replyToTopMsg` тоже достаточно часты, чтобы считать их обычными practical fields
+
+Важная оговорка:
+- `params.*` regex в corpus ловит и UI objects с именем `params`, поэтому статистика по редким полям шумная
+- доверяй прежде всего runtime-confirmed send fields из sections 7, 35.7 и 35.17
+
+--------------------------------------------------
+37.6 Updated Xposed / MethodHook picture
+--------------------------------------------------
+
+Сейчас это уже не fringe-подход, а большой пласт corpus.
+
+Частоты:
+
+```text
+hook_method           151
+MethodHook            139
+MethodReplacement      22
+hook_all_methods       15
+hook_filters           10
+```
+
+Живой current-corpus filtered example:
+
+```py
+@hook_filters(HookFilter.Condition("param.thisObject != null"), HookFilter.ArgumentNotNull(0))
+def after_hooked_method(self, param):
+    activity = param.thisObject
+    items = param.args[0]
+    ...
+```
+
+Ещё один current-corpus pattern:
+
+```py
+if (unhook := self.hook_method(method, handler)):
+    self.pi_hooks.append(unhook)
+...
+for h in self.pi_hooks:
+    self.unhook_method(h)
+```
+
+Rule for AI:
+- если ставишь много hooks, сохраняй refs и явно unhook на unload
+- если можешь решить задачу menu/settings/send hook-ами, не лезь в Xposed layer
+- но если речь про скрытые Telegram UI internals, `hook_method` в реальном corpus используется очень широко
+
+--------------------------------------------------
+37.7 Updated sound / vibration / TTS picture
+--------------------------------------------------
+
+Текущая частота sound-related features:
+
+```text
+VibrationEffect     16
+TextToSpeech/tts    10
+Vibrator             5
+AudioManager         4
+MediaPlayer          2
+RingtoneManager      1
+ToneGenerator        1
+```
+
+Смысл:
+- в этом corpus tactile/audio plugins живы, но они уже не “основной жанр”
+- чаще всего встречаются TTS и вибрация
+- ToneGenerator редкий, но очень полезный minimal-dependency path
+
+### Current ToneGenerator evidence
+
+Живой current-corpus sound table:
+
+```py
+SOUND_OPTIONS = {
+    "Без звука": -1,
+    "Короткий клик (DTMF_0)": ToneGenerator.TONE_DTMF_0,
+    "Мягкий сигнал (CDMA_SOFT_ERROR_LITE)": ToneGenerator.TONE_CDMA_SOFT_ERROR_LITE,
+    "Подтверждение (PROP_ACK)": ToneGenerator.TONE_PROP_ACK,
+    "Тихий звонок (CDMA_CONFIRM)": ToneGenerator.TONE_CDMA_CONFIRM,
+    "Быстрый импульс (CDMA_ABBR_ALERT)": ToneGenerator.TONE_CDMA_ABBR_ALERT,
+}
+```
+
+Это очень полезно для ИИ:
+- можно делать sound selector не из выдуманных значений, а из реальных tone constants Android
+- `ToneGenerator` подходит для мини-игр, feedback, notifications, aggressive beeps
+
+### Current vibration waveform evidence
+
+Живой current-corpus waveform pattern:
+
+```py
+if Build.VERSION.SDK_INT >= 26:
+    amplitudes = [0 if i % 2 == 0 else amp for i in range(len(pattern))]
+    effect = VibrationEffect.createWaveform(pattern, amplitudes, 0)
+    vibrator.vibrate(effect)
+else:
+    vibrator.vibrate(pattern, 0)
+```
+
+Что это даёт:
+- можно делать не только `createOneShot`, но и повторяющиеся vibration patterns
+- режимы типа `SOS`, `хаос`, pulses и long-running feedback реально делаются
+
+### Current TTS evidence
+
+Живой current-corpus pattern:
+
+```py
+TextToSpeech = find_class("android.speech.tts.TextToSpeech")
+OnInitListener = find_class("android.speech.tts.TextToSpeech$OnInitListener")
+
+class _OnInit(dynamic_proxy(TextToSpeech.OnInitListener)):
+    def onInit(self, status):
+        _TTS_STATE.init_ok = (status == TextToSpeech.SUCCESS)
+
+_TTS_STATE.tts = TextToSpeech(ctx, listener, GOOGLE_TTS_PKG)
+_TTS_STATE.tts.speak(text, TextToSpeech.QUEUE_FLUSH, None, "mandre_tts")
+```
+
+### Current MediaPlayer evidence
+
+Живой current-corpus pattern:
+
+```py
+from android.media import MediaPlayer, AudioManager
+
+self.media_player = MediaPlayer()
+
+class OnPreparedListener(dynamic_proxy(MediaPlayer.OnPreparedListener)):
+    ...
+```
+
+Rule for AI:
+- если нужен простой beep/feedback, сначала смотри `ToneGenerator`
+- если нужен speech, смотри `TextToSpeech`
+- если нужен complex custom audio file playback, только тогда `MediaPlayer`
+- если нужен tactile pattern, используй `VibrationEffect.createOneShot` или `createWaveform`
+
+--------------------------------------------------
+37.8 External dependencies in the wild
+--------------------------------------------------
+
+В текущем corpus встречаются:
+
+```text
+requests   99
+PIL        18
+bs4         2
+```
+
+Это НЕ означает, что надо тащить их по умолчанию.
+
+Правило:
+- `requests` очень популярен в community corpus, но это не helper API ExteraGram
+- используй его только если задача реально требует external HTTP flow
+- для image generation/composition некоторые authors используют `PIL`, но это уже дополнительный риск совместимости
+- safest default по-прежнему: plugin без сторонних библиотек
+
+--------------------------------------------------
+37.9 Common settings archetypes from current corpus
+--------------------------------------------------
+
+Частые `get_setting(...)` keys:
+
+```text
+enabled
+command
+command_prefix
+show_chat_menu
+api_key
+custom_prompt
+template
+show_in_drawer
+show_drawer_menu
+custom_url
+debug_mode
+send_audio
+show_caption
+custom_font_url
+font_family
+```
+
+Практический вывод:
+- хорошие настройки обычно группируются в 5 archetypes:
+  1. enable/toggle flags
+  2. command / prefix / trigger text
+  3. API / URL / token fields
+  4. UI placement flags (`show_in_drawer`, `show_chat_menu`)
+  5. output style flags (`show_caption`, `template`, formatting)
+
+Для ИИ это значит:
+- если делаешь новый plugin, settings screen должен быть не случайным набором полей
+- он должен отражать один из этих archetypes
+
+--------------------------------------------------
+37.10 Current-corpus noise and traps
+--------------------------------------------------
+
+В новом corpus дополнительно замечены ловушки:
+
+### `remove_on_send_message_hook()`
+
+Такой вызов встречается в некоторых plugins, например в `TextTransformerRN`.
+Но он не был подтверждён в `base_plugin.pyc`.
+
+Правило:
+- не используй `remove_on_send_message_hook()` как verified API
+- если нужно снять send hook, полагайся на verified hooks lifecycle или перепроверяй runtime отдельно
+
+### Некачественные type annotations
+
+В corpus всё ещё встречаются случаи, где:
+- `on_send_message_hook(...) -> HookStrategy`
+- но реально возвращается `HookResult`
+
+Правило:
+- всегда доверяй runtime spec, а не случайным type hints из community files
+
+### Family bias
+
+Некоторые экосистемы сильно реплицированы:
+- `mandre_lib*`
+- `templates*`
+- `ai_status*`
+- `re_extera_dex*`
+- `RnPlugins Add*`
+
+Правило:
+- не выводи “общие правила ExteraGram” только по одной семье форков
+
+--------------------------------------------------
+37.11 What section 37 changes in the final prompt behavior
+--------------------------------------------------
+
+После этого обновления ИИ должна действовать так:
+
+1. Сначала брать canonical API из sections 1-35.
+2. Затем проверять свежие current-corpus frequencies из section 37.
+3. Если нужен:
+   - command/autorewrite plugin: опирайся на 37.5
+   - UI/internal patch plugin: опирайся на 37.6
+   - menu/settings utility plugin: опирайся на 37.4 и 37.9
+   - sound/TTS/vibration plugin: опирайся на 37.7
+4. Не делать выводов по одному duplicated family.
+5. Не использовать unverified methods и enum values только потому, что они встретились в corpus.
+
+Итог:
+- sections 1-35 говорят, что реально поддерживает ExteraGram runtime
+- section 36 даёт прежние field-tested patterns
+- section 37 даёт свежую статистику и текущие примеры по большой выборке из 329 plugins
+
+==================================================
+38. LATEST CURATED REFRESH: 110 HEAVY / NEWER PLUGINS
+==================================================
+
+Этот раздел новее section 37 и отражает ещё один проход по текущей папке plugins после того, как набор был пересобран и туда были добавлены новые версии.
+
+Текущее правило свежести:
+- section 38 новее section 37
+- section 37 шире
+- section 38 уже и “тяжелее”, с заметным уклоном в advanced UI/internal plugins
+
+--------------------------------------------------
+38.1 Current set shape
+--------------------------------------------------
+
+Текущий snapshot:
+- `110` plugin-файлов
+
+Это уже не “массовая общая свалка”, а более curated set.
+Он заметно перекошен в сторону таких families:
+
+```text
+quantahut                  13
+ui_tweaks                  12
+reswag                      6
+qmrrchh_plugins_manager     5
+whoisZ                      5
+in_app_notifications        3
+```
+
+Что это означает:
+- текущий набор сильнее отражает advanced UX/UI-hacking, plugin-management и request/send interception
+- он хуже отражает простые маленькие utility plugins
+- поэтому section 38 очень полезен для advanced tasks, но не должен полностью заменять broader sections 36-37
+
+--------------------------------------------------
+38.2 Updated bias of the current set
+--------------------------------------------------
+
+Наиболее частые features в текущем наборе:
+
+```text
+run_on_ui_thread         85
+create_settings          83
+dynamic_proxy            68
+hook_method              66
+add_on_send_message_hook 53
+run_on_queue             51
+MethodHook               48
+add_menu_item            33
+send_request             28
+remove_menu_item         27
+send_message             22
+MethodReplacement        16
+parse_markdown           15
+VibrationEffect          15
+BotWebViewVibrationEffect 12
+hook_all_methods          7
+```
+
+Практический вывод:
+- в этом curated set advanced method hooks уже важнее, чем menu-only plugins
+- `send_request`, `pre_request_hook`, `post_request_hook` и plugin-manager internals стали намного заметнее
+- этот набор особенно полезен, если ИИ должна писать:
+  - глубокий UI tweak
+  - plugin manager / downloader
+  - request interceptor
+  - anti-forward / anti-media / safe-guard plugin
+
+--------------------------------------------------
+38.3 Updated imports in the curated set
+--------------------------------------------------
+
+Top modules:
+
+```text
+base_plugin                  110
+client_utils                  98
+android_utils                 97
+org.telegram.messenger        92
+typing                        81
+ui.bulletin                   80
+ui.settings                   79
+java                          77
+java.util                     67
+hook_utils                    65
+ui.alert                      52
+android.view                  52
+org.telegram.tgnet            50
+org.telegram.ui.Components    49
+org.telegram.ui               47
+java.lang                     47
+android.widget                46
+com.exteragram.messenger.plugins 31
+```
+
+Top imported names:
+
+```text
+BasePlugin          100
+log                  83
+get_last_fragment    80
+BulletinHelper       78
+run_on_ui_thread     77
+Header               67
+Switch               63
+AndroidUtilities     62
+dynamic_proxy        60
+HookStrategy         59
+find_class           58
+Divider              58
+R                    57
+HookResult           54
+Text                 52
+AlertDialogBuilder   52
+Input                50
+MethodHook           39
+MenuItemData         31
+MenuItemType         29
+```
+
+Что это меняет:
+- direct `com.exteragram.messenger.plugins.*` access в текущем наборе встречается чаще и увереннее
+- `R`, `AndroidUtilities`, `Theme`, `LayoutHelper`, `MessageObject`, `SendMessagesHelper` тоже очень типичны
+- это хороший индикатор, что mature plugins часто строят свой UI прямо на Android/Telegram classes
+
+--------------------------------------------------
+38.4 Request hooks are no longer edge-case patterns
+--------------------------------------------------
+
+В текущем наборе `pre_request_hook` и `post_request_hook` уже реально встречаются как рабочие механизмы, а не как редкая экзотика.
+
+Живой current example:
+
+```py
+def pre_request_hook(self, request_name: str, account: int, request: Any) -> HookResult:
+    if not self.get_setting(self.SETTINGS_ENABLED, True):
+        return HookResult()
+
+    changed = self._apply_rules(request_name, request)
+    self._record_entry("OUT", request_name, request, account=account, changed=changed)
+
+    if changed:
+        return HookResult(strategy=HookStrategy.MODIFY, request=request)
+    return HookResult()
+```
+
+И post-request pattern:
+
+```py
+def post_request_hook(self, request_name: str, account: int, response: Any, error: Any) -> HookResult:
+    ...
+    return HookResult()
+```
+
+Практический вывод:
+- если задача связана с outbound Telegram requests, `pre_request_hook` это уже нормальный design choice
+- если нужен inspection/logging/packet studio behavior, можно строиться на request hooks, а не только на send hooks
+- если request меняется, корректная форма возврата: `HookResult(strategy=HookStrategy.MODIFY, request=request)`
+
+Observed add_hook names в текущем наборе:
+
+```text
+TL_messages_forwardMessages
+TL_messages_sendMedia
+updateStatus
+on_message_hook
+```
+
+Важно:
+- `TL_messages_forwardMessages` в этом наборе встречается особенно часто, но это partly family-biased из `UiTweaks`
+- `on_message_hook` не подтверждён runtime spec и должен считаться подозрительным community-specific pattern
+
+--------------------------------------------------
+38.5 AppEvent is active again in this curated set
+--------------------------------------------------
+
+В отличие от section 37, текущий набор снова показывает заметное использование `on_app_event`.
+
+Живой current pattern:
+
+```py
+def on_app_event(self, event_type: AppEvent) -> None:
+    if event_type in (AppEvent.PAUSE, AppEvent.STOP):
+        self._clear_view_state()
+    elif event_type == AppEvent.RESUME:
+        run_on_ui_thread(self._bootstrap_current_fragment)
+```
+
+Другой частый pattern:
+
+```py
+if event_type == AppEvent.START:
+    ...
+elif event_type == AppEvent.RESUME:
+    ...
+```
+
+Практический вывод:
+- `PAUSE` / `STOP` часто используют для cleanup
+- `START` / `RESUME` часто используют для bootstrap/resync UI
+- если plugin держит overlay, temporary state, fragment bindings, listeners или in-app notifications, `on_app_event` может быть правильным местом для lifecycle control
+
+--------------------------------------------------
+38.6 Current menu profile in the curated set
+--------------------------------------------------
+
+Menu type frequency:
+
+```text
+CHAT_ACTION_MENU       18
+DRAWER_MENU            16
+MESSAGE_CONTEXT_MENU    4
+PROFILE_ACTION_MENU     1
+```
+
+Это не значит, что `MESSAGE_CONTEXT_MENU` “плохой”.
+Это значит, что текущий curated set смещён в сторону control panels, plugin managers и chat tools.
+
+Практический вывод:
+- для manager/tweaks/control entrypoint сейчас особенно типичны `CHAT_ACTION_MENU` и `DRAWER_MENU`
+- `MESSAGE_CONTEXT_MENU` всё ещё нужен для precise message actions, но в этом наборе он просто реже
+
+--------------------------------------------------
+38.7 Current send-hook profile in the curated set
+--------------------------------------------------
+
+Observed strategies:
+
+```text
+CANCEL        43
+MODIFY        29
+DEFAULT       15
+CONTINUE       2
+MODIFY_FINAL   1
+```
+
+Правило остаётся прежним:
+- `CONTINUE` не считается verified canonical strategy
+- используй verified set: `DEFAULT`, `CANCEL`, `MODIFY`, `MODIFY_FINAL`
+
+Typical current-corpus fields:
+
+```text
+message
+peer
+replyToMsg
+entities
+replyToTopMsg
+caption
+document
+photo
+path
+```
+
+Observed current behavior:
+- этот набор часто использует send-hook не только для команд, но и для:
+  - media interception
+  - forward restrictions
+  - text file conversion
+  - safeguard behavior
+  - plugin manager command control
+
+--------------------------------------------------
+38.8 Sound / vibration / haptics in the curated set
+--------------------------------------------------
+
+Current counts:
+
+```text
+VibrationEffect           15
+BotWebViewVibrationEffect 12
+AudioManager               5
+MediaPlayer                3
+SoundPool                  3
+TextToSpeech/tts           1
+RingtoneManager            1
+ToneGenerator              1
+```
+
+Это важное изменение:
+- в этом наборе в вибрации и haptics заметно больше роли играет Telegram-side `BotWebViewVibrationEffect`
+- а не только raw Android vibrator APIs
+
+### Current Telegram-side haptic pattern
+
+В текущем наборе часто импортируется:
+
+```py
+from org.telegram.messenger import BotWebViewVibrationEffect
+```
+
+Это значит:
+- некоторые плагины используют не только `Vibrator`/`VibrationEffect`, но и уже готовые Telegram-side vibration effects
+- это useful advanced pattern, но риск совместимости выше, чем у обычного Android vibration API
+
+### Current Android vibration pattern
+
+```py
+if Build.VERSION.SDK_INT >= 26:
+    vibrator.vibrate(VibrationEffect.createOneShot(duration, amp))
+```
+
+или waveform:
+
+```py
+effect = VibrationEffect.createWaveform(pattern, amplitudes, 0)
+vibrator.vibrate(effect)
+```
+
+### Current notification sound pattern
+
+Живой current example:
+
+```py
+uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+ringtone = RingtoneManager.getRingtone(ctx, uri)
+if ringtone:
+    ringtone.play()
+```
+
+### Current advanced audio pattern
+
+В `UiTweaks` families встречаются:
+- `SoundPool`
+- `MediaPlayer.create(...)`
+- `MediaPlayer()`
+- hooks вокруг `android.media.SoundPool`
+
+Rule for AI:
+- simplest safe order is still:
+  1. `VibrationEffect`
+  2. `RingtoneManager`
+  3. `ToneGenerator`
+  4. `MediaPlayer`
+  5. `SoundPool`
+  6. `BotWebViewVibrationEffect` only for Telegram-specific advanced behavior
+
+Why `BotWebViewVibrationEffect` is last:
+- pattern is interesting
+- but helper is Telegram-specific and less stable than raw Android vibration APIs
+
+--------------------------------------------------
+38.9 Current plugin-manager / downloader internals
+--------------------------------------------------
+
+Этот набор особенно богат на плагины, которые сами управляют plugin subsystem.
+
+Observed current patterns:
+
+```py
+PluginsController.getInstance().shutdown()
+PluginsController.getInstance().init()
+PluginsController.getInstance().restart()
+PluginsController.getInstance().setPluginEnabled(plugin.getId(), enabled, callback)
+PluginsController.getInstance().deletePlugin(plugin.getId(), callback)
+controller.pluginsDir
+PluginsController.getInstance().getPluginEngine(plugin_id)
+PluginsController.engines.get(PluginsConstants.PYTHON)
+```
+
+Также встречается:
+
+```py
+java_plugin = PluginsController.getInstance().plugins.get(__id__)
+dialogs_activity.presentFragment(PluginSettingsActivity(java_plugin))
+```
+
+Или:
+
+```py
+controller = PluginsController.getInstance()
+plugins_dir = controller.pluginsDir
+```
+
+Практический вывод:
+- plugin-manager plugins реально лезут глубоко в internal controller
+- это полезно, если задача именно про install/enable/disable/reload plugins
+- но это не safe default path для обычного plugin feature
+
+Rule for AI:
+- используй такие internal controller operations только если пользователь явно просит plugin manager / downloader / installer / plugin-tools
+- не строй обычный business logic plugin на прямом `PluginsController.restart()` или `deletePlugin(...)`
+
+--------------------------------------------------
+38.10 Current settings style in the curated set
+--------------------------------------------------
+
+В текущем наборе очень заметен один archetype:
+- крупные UI/tweaks plugins держат десятки toggle settings
+
+Частые keys из current set:
+
+```text
+show_logs
+confirm_forward
+confirm_gif
+enable_no_quote_forward
+prevent_webapp_swipe_down
+confirm_stickers
+disable_article_viewer_swipe
+confirm_join_chat
+enable_goto_message
+confirm_voice
+prevent_swipe_while_editing
+always_show_download_manager
+hide_bot_button
+always_show_proxy_button
+fab_settings_shortcut
+hide_archived_chats
+hide_phone_number
+prevent_swipe_while_typing
+hide_star_reaction
+```
+
+Что это даёт ИИ:
+- текущий curated set показывает сильный жанр “UX safety / confirmations / hide-toggle / swipe-control / button-visibility”
+- если пользователь просит “крутой твик”, один из strongest design directions это не генерация контента, а именно:
+  - confirm dialogs
+  - hide/show elements
+  - gesture protection
+  - safer forwarding / sending / opening
+
+--------------------------------------------------
+38.11 Current traps from this curated set
+--------------------------------------------------
+
+### `HookStrategy.CONTINUE`
+
+В текущем наборе встречается `CONTINUE`, но это не canonical runtime strategy.
+
+Правило:
+- не используй `CONTINUE`
+- держись verified set
+
+### `on_message_hook`
+
+В current add-hook names встретился `on_message_hook`.
+Он не подтверждён runtime spec.
+
+Правило:
+- считай это community-specific or legacy pattern
+- не делай его частью standard prompt behavior
+
+### Family overfitting is very dangerous here
+
+Особенно не переобобщай по:
+- `quantahut*`
+- `ui_tweaks*`
+- `reswag*`
+- `plugins_manager*`
+
+Потому что:
+- эти families тяжёлые
+- они задавливают статистику
+- они активно используют internals, hooks, private fields и controller access
+
+--------------------------------------------------
+38.12 How section 38 should influence generation
+--------------------------------------------------
+
+Если пользователь просит:
+
+`обычный utility plugin`
+- ориентируйся больше на sections 1-37
+
+`advanced tweak / anti-feature / forward/media interception / internal UI hack`
+- section 38 очень полезен
+
+`plugin manager / plugin downloader / plugin tools`
+- section 38.9 становится главным practical reference
+
+`sound / haptic / notification behavior`
+- section 38.8 даёт freshest current patterns
+
+`request interceptor / packet studio / network-like observer`
+- section 38.4 и 38.5 особенно важны
+
+Итоговая иерархия доверия теперь такая:
+1. sections 1-35: verified runtime API
+2. section 38: freshest curated advanced corpus
+3. section 37: larger recent corpus
+4. section 36: older broad field-tested corpus
+
+==================================================
+39. OFFICIAL TELEGRAM SOURCE INTEGRATION LAYER
+==================================================
+
+Этот section добавляет ещё один уровень понимания:
+- verified runtime API ExteraGram говорит, ЧЕМ можно пользоваться безопасно
+- official Telegram Android source помогает понять, КУДА встраивать feature, КАКИЕ экраны отвечают за нужное поведение и какие классы/методы/поля вообще стоит искать в local build
+
+Очень важное правило:
+- official Telegram source = navigation map
+- local ExteraGram runtime evidence = final proof
+
+Никогда не делай наоборот.
+То есть:
+- не бери class/method из GitHub и не считай его автоматически рабочим в ExteraGram
+- сначала используй source как карту
+- потом сверяй с local runtime / dex / pyc / verified helpers
+
+--------------------------------------------------
+39.1 Why official Telegram source is useful for plugin generation
+--------------------------------------------------
+
+Почему этот слой реально полезен:
+
+- ExteraGram наследует огромную часть архитектурной логики Telegram Android
+- названия экранов, controller-ов, cells, drawables, view-компонентов и message pipelines часто совпадают или очень близки
+- даже когда конкретный метод слегка отличается, official source всё равно помогает понять:
+  - в каком экране искать нужный элемент
+  - какой view обычно отвечает за участок UI
+  - какой controller/manager связан с action flow
+  - где обычно происходят send / edit / open / present / bind / layout operations
+
+Для ИИ это особенно важно:
+- без official source модель часто угадывает не туда
+- с official source у ИИ появляется ориентир, какие классы и методы логично пробовать в local build
+
+--------------------------------------------------
+39.2 Official Telegram source files which are especially useful
+--------------------------------------------------
+
+Ниже список самых полезных upstream файлов.
+Это не значит, что всё в них 1:1 доступно в ExteraGram.
+Это значит:
+- они дают сильную structural map
+- по ним надо ориентироваться, когда ИИ строит hypothesis
+
+### Core screens
+
+`ProfileActivity.java`
+- profile screen
+- bio/info rows
+- avatar/header area
+- media/music/publications sections
+- overlay/button insertion near profile content
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/ProfileActivity.java
+
+`DialogsActivity.java`
+- main chats list
+- dialog rows
+- chat list gestures
+- selection / long press / opening dialogs
+- dialog filtering / tabs / folders / chat list UI
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java
+
+`ChatActivity.java`
+- chat screen
+- top bar / avatar container / reply UI / message list / composer-adjacent actions
+- many overlay, panel, mini-toolbar, and inline button use-cases
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
+
+`LaunchActivity.java`
+- activity root
+- fragment stack
+- safe last fragment / presentation / navigation host
+- useful mental model for global overlays and fragment transitions
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java
+
+### Messaging and sending pipeline
+
+`SendMessagesHelper.java`
+- sending text/files/media
+- edit flows
+- file/document sending logic
+- one of the most important source maps for send-related plugins
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java
+
+`MessageObject.java`
+- message classification
+- media type detection
+- helper logic around message structure
+- extremely useful when you need to understand what kind of message you are handling
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java
+
+### UI components and visual primitives
+
+`BackupImageView.java`
+- Telegram image widget used everywhere
+- avatars, previews, media covers, profile visuals
+- important for plugins that inject or replace image-heavy UI
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/BackupImageView.java
+
+`ImageReceiver.java`
+- image rendering internals
+- aspect-fit vs cover-like behavior
+- blur / round radius / image state related reasoning
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/messenger/ImageReceiver.java
+
+`AvatarDrawable.java`
+- avatar placeholders
+- fallback initials
+- profile/chat image fallback behavior
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/AvatarDrawable.java
+
+`RecyclerListView.java`
+- list internals
+- touch handling
+- many Telegram lists extend or rely on it
+- useful for drag/select/swipe/list-row style plugins
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/RecyclerListView.java
+
+`DialogCell.java`
+- chats list row visual logic
+- dialog row touch/rebind/reuse behavior
+- key source map for chat-row UI hacks and stability issues
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Cells/DialogCell.java
+
+`ActionBarMenuItem.java`
+- action bar buttons and popup item behavior
+- useful when plugins want to alter top bar items or dropdown behavior
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/ActionBarMenuItem.java
+
+`Theme.java`
+- theme keys
+- selector/drawable helpers
+- color retrieval patterns
+- essential for plugins that want native-looking UI
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/Theme.java
+
+`LayoutHelper.java`
+- Telegram-specific layout helper
+- common for creating Frame/Linear params in a Telegram-like style
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/LayoutHelper.java
+
+### Stars / paid / premium-like flows
+
+`StarsController.java`
+- stars balance and stars-related actions
+- useful as a structural map for stars UI/plugins
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Stars/StarsController.java
+
+`StarsReactionsSheet.java`
+- paid reactions / stars reaction screen
+- useful to identify spend/reaction interaction points
+
+Official source:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Stars/StarsReactionsSheet.java
+
+--------------------------------------------------
+39.3 Source-driven workflow for an AI model
+--------------------------------------------------
+
+Если пользователь просит новый plugin feature, ИИ должна действовать так:
+
+1. Определи, какой screen/flow относится к задаче:
+   - profile
+   - chats list
+   - chat screen
+   - send/edit/media pipeline
+   - stars/gifts/reactions
+   - plugin settings / custom overlay
+
+2. Найди соответствующий upstream Telegram source file:
+   - `ProfileActivity`
+   - `DialogsActivity`
+   - `ChatActivity`
+   - `SendMessagesHelper`
+   - `MessageObject`
+   - `BackupImageView`
+   - `RecyclerListView`
+   - etc.
+
+3. Из upstream source выведи hypothesis:
+   - какие view likely exist
+   - какие lifecycle methods likely useful
+   - какие private fields worth probing
+   - какие child components likely attached to screen
+
+4. Потом проверь hypothesis against local ExteraGram:
+   - verified API sections 1-35
+   - local dex strings
+   - existing working plugins
+   - `find_class(...)`
+   - `get_private_field(...)`
+
+5. Только после этой двойной верификации строй final plugin logic.
+
+--------------------------------------------------
+39.4 Never confuse source guidance with runtime proof
+--------------------------------------------------
+
+Очень важное anti-hallucination правило:
+
+### Wrong model behavior
+
+`В Telegram source есть ProfileActivity.musicView, значит можно просто использовать это поле напрямую.`
+
+Это ошибка.
+
+Правильное мышление:
+
+`ProfileActivity.java suggests that music-related UI likely exists in or around profile media sections. In ExteraGram, probe for fields like musicView/sharedMediaLayout/fragmentView and fall back safely if a field is missing.`
+
+Rule:
+- upstream source names = strong hint
+- local runtime access = actual proof
+
+--------------------------------------------------
+39.5 Class-to-task map for plugin generation
+--------------------------------------------------
+
+Когда пользователь просит конкретную фичу, ИИ должна сразу мапить задачу на upstream source map:
+
+### Profile visual plugin
+
+User asks:
+- background in profile
+- button above profile sections
+- custom block in profile
+- avatar-based overlay
+
+Primary source map:
+- `ProfileActivity.java`
+- `BackupImageView.java`
+- `AvatarDrawable.java`
+- `ImageReceiver.java`
+- `Theme.java`
+- `LayoutHelper.java`
+
+Local runtime strategy:
+- hook `ProfileActivity.createView`
+- fallback to `onResume`
+- detach in `onFragmentDestroy`
+- anchor to `fragmentView`, parent container, or `decorView`
+
+### Chats list plugin
+
+User asks:
+- hidden chats
+- custom list row actions
+- long-hold on chats
+- random icon replacement in list
+- folder-like overlays
+
+Primary source map:
+- `DialogsActivity.java`
+- `DialogCell.java`
+- `RecyclerListView.java`
+
+Local runtime strategy:
+- hook `DialogsActivity` lifecycle
+- hook list/cell touch carefully
+- respect row reuse
+- reset only plugin-owned visual state
+
+### Chat screen plugin
+
+User asks:
+- panel under chat header
+- custom chat tools
+- inline action in top bar
+- composer-adjacent widget
+
+Primary source map:
+- `ChatActivity.java`
+- `ChatAvatarContainer.java` if available in local build
+- `ActionBarMenuItem.java`
+- `RecyclerListView.java`
+
+Local runtime strategy:
+- hook `createView` / `onResume`
+- read `fragmentView`
+- probe header container
+- use overlay if native attach is unstable
+
+### File/media sending plugin
+
+User asks:
+- edit/send file
+- share document
+- custom send behavior
+- caption/send helper logic
+
+Primary source map:
+- `SendMessagesHelper.java`
+- `MessageObject.java`
+
+Local runtime strategy:
+- prefer verified ExteraGram helpers like `send_document(...)`
+- use upstream source only to understand flow, not to replace safe helpers blindly
+
+### Stars / reactions / gift-like paid UI plugin
+
+User asks:
+- protect stars spend
+- intercept stars reaction
+- open stars UI
+
+Primary source map:
+- `StarsController.java`
+- `StarsReactionsSheet.java`
+
+Local runtime strategy:
+- use explicit hook names and class probes
+- never assume every paid UI flow is identical across builds
+
+--------------------------------------------------
+39.6 Most useful lifecycle methods to try first
+--------------------------------------------------
+
+Official Telegram source strongly suggests these are usually the safest first targets for UI plugins:
+
+- `createView`
+- `onResume`
+- `onPause`
+- `onFragmentDestroy`
+
+Why:
+- `createView` = attach UI after screen view exists
+- `onResume` = refresh state if screen already exists
+- `onPause` = cancel timers / active interactions
+- `onFragmentDestroy` = cleanup overlays and remove plugin-owned views
+
+Rule for AI:
+- for UI plugins, try lifecycle hooks before low-level draw or adapter hooks
+- drop lower only if the high-level attach point is insufficient
+
+--------------------------------------------------
+39.7 Frequently useful private fields suggested by source structure
+--------------------------------------------------
+
+These names are not guaranteed, but they are very common and should be treated as good probe candidates:
+
+### Screen/container fields
+- `fragmentView`
+- `listView`
+- `recyclerListView`
+- `actionBar`
+- `contentView`
+- `sharedMediaLayout`
+- `musicView`
+- `topView`
+- `avatarContainer`
+- `chatListView`
+
+### Data/current-object fields
+- `currentAccount`
+- `user`
+- `currentUser`
+- `chat`
+- `currentChat`
+- `dialog_id`
+- `chatId`
+- `userId`
+
+Rule:
+- probe them conservatively
+- always wrap with `try/except`
+- always have fallback behavior if field does not exist
+
+--------------------------------------------------
+39.8 Telegram source-driven view injection strategy
+--------------------------------------------------
+
+When the user wants visible UI inside an existing Telegram screen, use this decision ladder:
+
+1. Native attach inside existing screen container
+2. Parent container attach
+3. Root fragment attach
+4. `decorView` overlay
+
+Interpretation:
+
+### Use native attach when:
+- the target sub-container is found reliably
+- position matters strongly
+- plugin must feel integrated with the screen
+
+### Use root fragment attach when:
+- you need safe full-screen or large overlay behavior
+- exact native sub-container is unstable across builds
+
+### Use decorView when:
+- you need a backdrop / global visual layer / fullscreen overlay
+- the screen’s internal layout is too unstable or too nested
+
+AI rule:
+- do not insist on native attach if it is unstable
+- prefer stable overlay over broken “perfect integration”
+
+--------------------------------------------------
+39.9 Telegram-native look: what to reuse conceptually
+--------------------------------------------------
+
+If the plugin wants to look like Telegram instead of generic Android, the source strongly points to these patterns:
+
+- `AndroidUtilities.dp(...)` for dimensions
+- `Theme.getColor(...)` for colors
+- `Theme.createSelectorDrawable(...)` for pressed states
+- `GradientDrawable` with rounded corners for cards/chips
+- `LayoutHelper` for layout params when available
+- `BackupImageView` + `AvatarDrawable` + `ImageLocation.getForUserOrChat(...)` for avatars
+
+Strong UI rule:
+- when a plugin adds rows/cards/chips, prefer Telegram-style density and corner radius
+- avoid random material defaults if the rest of the screen is Telegram-like
+
+--------------------------------------------------
+39.10 Telegram theme keys which are very often useful
+--------------------------------------------------
+
+These keys appear extremely often in plugin practice and fit Telegram-like UIs well:
+
+- `key_windowBackgroundWhite`
+- `key_windowBackgroundWhiteBlackText`
+- `key_windowBackgroundWhiteGrayText`
+- `key_dialogBackground`
+- `key_actionBarDefault`
+- `key_actionBarDefaultTitle`
+- `key_divider`
+- `key_listSelector`
+- `key_featuredStickers_addButton`
+- `key_avatar_backgroundBlue`
+- `key_avatar_backgroundGreen`
+- `key_chats_onlineCircle`
+
+Rule:
+- if a plugin needs a fast native-looking palette, start from these
+- if a key fails, fall back gracefully to static colors
+
+--------------------------------------------------
+39.11 Official source guidance for image-heavy plugins
+--------------------------------------------------
+
+If the requested plugin deals with:
+- avatars
+- profile backdrops
+- channel preview covers
+- fake cards / media art
+- image replacement
+
+Then source map should immediately include:
+- `BackupImageView`
+- `ImageReceiver`
+- `AvatarDrawable`
+- `ImageLocation`
+
+Practical AI rules:
+- use `BackupImageView` if the image must feel Telegram-native
+- use plain `ImageView` if you control the bitmap yourself and only need visual display
+- if image fit/crop is wrong, think about:
+  - `setAspectFit(False)` or equivalent
+  - scale type / cover mode
+  - round radius reset
+  - host container height vs full-screen host
+
+--------------------------------------------------
+39.12 Official source guidance for list-cell plugins
+--------------------------------------------------
+
+If the requested plugin touches chats list or other recycled rows:
+
+Primary source map:
+- `DialogsActivity`
+- `DialogCell`
+- `RecyclerListView`
+
+Critical stability rule:
+- recycled cells are dangerous
+- any alpha/scale/translation/padding change can leak into other rows
+
+Therefore:
+- only mutate plugin-owned state
+- reset any visual transformation you apply
+- kill timers when a row is reused or screen is paused
+- prefer overlay progress indicators over layout mutation
+
+--------------------------------------------------
+39.13 Official source guidance for send/edit plugins
+--------------------------------------------------
+
+If user asks about:
+- editing documents
+- resending text/media
+- changing caption flow
+- intercepting send behavior
+
+Then official source should map to:
+- `SendMessagesHelper`
+- `MessageObject`
+
+But generation rule remains:
+- use verified ExteraGram helper first
+- use official source to understand the flow
+- only go internal/reflection route if the user explicitly wants deeper Telegram-native behavior and safe helper is insufficient
+
+--------------------------------------------------
+39.14 Official source guidance for stars / premium / reaction protection
+--------------------------------------------------
+
+If user asks:
+- protect stars
+- intercept paid reaction
+- add auth before stars spend
+- detect stars UI
+
+Then source map:
+- `StarsController`
+- `StarsReactionsSheet`
+
+AI rule:
+- classify these as high-risk UI flows
+- prefer defensive, reversible interception
+- log class/method availability
+- always degrade safely if one paid flow differs from the expected upstream path
+
+--------------------------------------------------
+39.15 Telegram source should improve search strategy, not increase hallucination
+--------------------------------------------------
+
+When official source suggests a class, the AI should search locally for:
+
+1. exact class name
+2. class name substring
+3. closely related component names
+4. methods with matching responsibility, even if exact names differ
+
+Example:
+
+User wants:
+`button above music block in profile`
+
+Good reasoning:
+- official source suggests `ProfileActivity`
+- likely anchor near profile media/music section
+- local probes:
+  - `musicView`
+  - `sharedMediaLayout`
+  - `fragmentView`
+  - parent container around profile content
+
+Bad reasoning:
+- “Telegram source has `musicView`, therefore ExteraGram definitely has it and it definitely behaves the same”
+
+--------------------------------------------------
+39.16 Search terms the AI should try in local code / dex / decompiled output
+--------------------------------------------------
+
+For profile plugins:
+- `ProfileActivity`
+- `musicView`
+- `sharedMediaLayout`
+- `avatarContainer`
+- `fragmentView`
+- `userId`
+- `chatId`
+
+For chats list plugins:
+- `DialogsActivity`
+- `DialogCell`
+- `RecyclerListView`
+- `onItemClick`
+- `performLongClick`
+- `scrollBy`
+
+For chat screen plugins:
+- `ChatActivity`
+- `ChatAvatarContainer`
+- `ActionBarMenuItem`
+- `contentView`
+- `fragmentView`
+
+For send/edit plugins:
+- `SendMessagesHelper`
+- `MessageObject`
+- `prepareSending`
+- `editMessage`
+- `sendDocument`
+
+For stars/gifts/reactions:
+- `StarsController`
+- `StarsReactionsSheet`
+- `Gift`
+- `sendPaidReaction`
+- `sendStarsForm`
+
+--------------------------------------------------
+39.17 Source-driven plugin planning templates
+--------------------------------------------------
+
+### Template A: profile enhancement
+
+1. Source map:
+   - `ProfileActivity`
+   - `BackupImageView`
+   - `Theme`
+2. Local probes:
+   - `fragmentView`
+   - `musicView`
+   - `sharedMediaLayout`
+3. Attach strategy:
+   - `createView` -> attach
+   - `onResume` -> refresh
+   - `onFragmentDestroy` -> cleanup
+4. Fallback:
+   - if native anchor missing, use root/decor overlay
+
+### Template B: list interaction plugin
+
+1. Source map:
+   - `DialogsActivity`
+   - `DialogCell`
+   - `RecyclerListView`
+2. Local probes:
+   - list view
+   - cell touch methods
+3. Safety:
+   - cancel timers on pause
+   - reset only plugin-owned visual state
+   - avoid permanent row layout mutations
+
+### Template C: send/edit plugin
+
+1. Source map:
+   - `SendMessagesHelper`
+   - `MessageObject`
+2. Runtime-first path:
+   - verified helper if available
+3. Deep path only if needed:
+   - internal send pipeline
+4. Safety:
+   - validate peer/reply/file path
+   - preserve filename semantics
+
+==================================================
+40. SAFE SOURCE-DERIVED HOOK RECIPES
+==================================================
+
+This section converts source understanding into safer plugin design recipes.
+
+--------------------------------------------------
+40.1 Recipe: attach custom UI to a Telegram screen
+--------------------------------------------------
+
+Use this mental model:
+
+1. Hook screen `createView`
+2. Get `fragmentView`
+3. Try to find native anchor
+4. If anchor is unstable, add overlay to root
+5. Cleanup in `onFragmentDestroy`
+
+Why this is strong:
+- matches upstream screen lifecycle
+- avoids random timing bugs
+- easy to refresh in `onResume`
+
+--------------------------------------------------
+40.2 Recipe: add a profile button or profile block
+--------------------------------------------------
+
+Best practice:
+- source map to `ProfileActivity`
+- try anchor around known profile content fields
+- if exact field missing, attach to `fragmentView` or its parent
+- avoid mutating `RecyclerView` during layout if overlay can solve the problem
+
+Practical warning:
+- direct insertion into a list while it is computing layout can crash
+- if you are not 100% sure about the timing, use delayed attach / post / root overlay
+
+--------------------------------------------------
+40.3 Recipe: add a backdrop or hero image to profile/chat
+--------------------------------------------------
+
+Best practice:
+- use a plugin-owned layer
+- keep image logic separated from native avatar view
+- if native screen host is unstable, attach backdrop to higher parent or `decorView`
+- use gradient scrim to preserve readability
+
+Do not:
+- rely only on margins if the host itself is wrong
+- confuse avatar presentation with backdrop presentation
+
+--------------------------------------------------
+40.4 Recipe: intercept sending or sending-adjacent behavior
+--------------------------------------------------
+
+Best practice:
+- first ask: does verified ExteraGram helper already exist?
+- if yes, use helper
+- only read `SendMessagesHelper` source to understand semantics and naming
+
+Good uses:
+- file send
+- edit/send flow understanding
+- safer document handling
+
+--------------------------------------------------
+40.5 Recipe: build Telegram-looking settings or tool overlays
+--------------------------------------------------
+
+Best practice:
+- use `Theme.getColor`
+- use rounded `GradientDrawable`
+- use Telegram density via `AndroidUtilities.dp`
+- if plugin settings screen is unstable, build in-plugin overlay settings
+
+This pattern is especially strong for:
+- file editors
+- proxy dashboards
+- profile tool panels
+- visual UI plugins
+
+--------------------------------------------------
+40.6 Recipe: image injection without layout disasters
+--------------------------------------------------
+
+If the plugin injects big images:
+- use dedicated container
+- keep image separate from content cards
+- use scrim/fade
+- avoid changing content view paddings unless necessary
+- test both `fragmentView` host and higher parent host
+
+==================================================
+41. OFFICIAL TELEGRAM SOURCE URL APPENDIX
+==================================================
+
+These URLs are useful starting points when an AI wants to inspect upstream architecture before generating a plugin:
+
+- ProfileActivity
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/ProfileActivity.java
+
+- DialogsActivity
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java
+
+- ChatActivity
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
+
+- LaunchActivity
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java
+
+- SendMessagesHelper
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java
+
+- MessageObject
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java
+
+- BackupImageView
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/BackupImageView.java
+
+- ImageReceiver
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/messenger/ImageReceiver.java
+
+- AvatarDrawable
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/AvatarDrawable.java
+
+- RecyclerListView
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/RecyclerListView.java
+
+- DialogCell
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Cells/DialogCell.java
+
+- ActionBarMenuItem
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/ActionBarMenuItem.java
+
+- Theme
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/Theme.java
+
+- LayoutHelper
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/LayoutHelper.java
+
+- StarsController
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Stars/StarsController.java
+
+- StarsReactionsSheet
+  https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Stars/StarsReactionsSheet.java
+
+==================================================
+42. FINAL AI INSTRUCTION FOR SOURCE-AWARE GENERATION
+==================================================
+
+When official Telegram source is relevant, the AI must do all of the following:
+
+1. Identify the likely upstream screen/component.
+2. Use upstream code only as architectural guidance.
+3. Verify every practical assumption against ExteraGram runtime evidence.
+4. Prefer verified helpers over internal reflection when both can solve the task.
+5. Use lifecycle-safe attach/detach patterns.
+6. Prefer stable overlays over brittle “perfect native injection”.
+7. If a source-derived hypothesis fails locally, degrade safely and keep the plugin loadable.
+
+The best source-aware ExteraGram plugin is not the one that copies Telegram internals most aggressively.
+It is the one that:
+- understands Telegram’s structure,
+- verifies it against ExteraGram,
+- and then chooses the most stable implementation path.
+
+==================================================
+43. FIELD LESSONS FROM REAL PLUGIN ITERATIONS
+==================================================
+
+This section is not abstract theory.
+It captures failure patterns and working patterns discovered while iterating on many actual ExteraGram plugins.
+
+This section should strongly influence generation quality.
+
+--------------------------------------------------
+43.1 Exact callback / hook signatures matter a lot
+--------------------------------------------------
+
+One of the easiest ways to break a plugin is to use an almost-correct callback name or wrong argument list.
+
+### Verified strong rule
+
+For send interception, prefer:
+
+```py
+def on_send_message_hook(self, account, params):
+    ...
+```
+
+Do not assume variants like:
+- `on_send_message(self, params)`
+- `on_message_hook(...)`
+- `on_send(...)`
+
+unless the runtime proof explicitly supports them.
+
+AI rule:
+- if a hook name is not verified, do not make it the primary integration path
+- prefer canonical verified callbacks
+
+--------------------------------------------------
+43.2 Prefer verified helpers over reflection-heavy send internals
+--------------------------------------------------
+
+In practice, send-related plugins were much more stable when they used verified helpers like:
+- `client_utils.send_document(...)`
+- other confirmed helper functions
+
+And much less stable when they tried to directly rebuild Telegram’s sending internals via reflection.
+
+Example lesson:
+- blindly calling internal `SendMessagesHelper.prepareSending...`-style methods can produce fake success, wrong arg order, or silent non-send
+- using verified helper wrappers is much safer
+
+AI rule:
+- if a helper exists, use the helper
+- only drop into internal reflection if no helper path exists and the user explicitly wants deeper risky behavior
+
+--------------------------------------------------
+43.3 PluginSettingsActivity is not always reliable
+--------------------------------------------------
+
+Real-world lesson:
+- standard ExteraGram settings screens can be unstable depending on:
+  - icon names
+  - null values
+  - selector defaults
+  - unexpected settings types
+  - plugin cache / stale registration
+
+Observed failure patterns:
+- settings open but show garbage / placeholder rows
+- settings silently fail to render
+- null values crash internal maps
+- fancy icons or risky field configs break registration
+
+### Safe settings rules
+
+When using `create_settings()`:
+- prefer plain `Header`, `Text`, `Switch`, `Input`, `Selector`
+- avoid risky icon usage unless you know the icon exists
+- make selector defaults type-correct
+- avoid null defaults
+- normalize settings before the screen opens
+
+### Very important fallback
+
+If the standard settings screen is unstable:
+- build in-plugin settings UI as a custom overlay
+- open it from menu/button/command
+- keep the plugin usable even if `PluginSettingsActivity` is weak
+
+This is a real, battle-tested design strategy.
+
+--------------------------------------------------
+43.4 Normalize settings aggressively
+--------------------------------------------------
+
+A recurring source of crashes:
+- old settings saved as string
+- new code expects int
+- selector saved as string label instead of index
+- imported preset contains null
+- one version stores `"true"` and another expects boolean
+
+AI rule:
+- every serious plugin should have a settings normalization layer
+
+Good pattern:
+
+```py
+def _ensure_defaults(self):
+    for key, value in DEFAULT_PLUGIN_SETTINGS.items():
+        current = self.get_setting(key, None)
+        if current is None:
+            self.set_setting(key, value)
+```
+
+And for typed values:
+- parse int safely
+- clamp values
+- map strings to canonical values
+- fallback if invalid
+
+--------------------------------------------------
+43.5 Java collections are not Python collections
+--------------------------------------------------
+
+One of the most common Chaquopy mistakes:
+- assuming Java `ArrayList` is directly iterable like a Python list
+
+Real failure:
+- `for item in results:` on Java `ArrayList`
+- runtime throws `TypeError: 'ArrayList' object is not iterable`
+
+AI rule:
+- whenever a value likely comes from Java runtime, do not assume Python sequence semantics
+
+Safer pattern:
+- check `size()`
+- access with `get(i)`
+- create a helper adapter for Java lists
+
+Example mental model:
+
+```py
+size = int(java_list.size() or 0)
+for i in range(size):
+    item = java_list.get(i)
+```
+
+This also applies to:
+- `document.attributes`
+- `reactions.results`
+- many Telegram controller arrays
+
+--------------------------------------------------
+43.6 Primitive type mismatches can crash hooks instantly
+--------------------------------------------------
+
+Real-world failure:
+- a hook replaced an `int` argument with Python `int` / Java `Long`
+- method expected primitive `int`
+- client crashed
+
+Rule:
+- when modifying Java method args, respect primitive expectations exactly
+
+If a method expects:
+- `int` -> use proper integer-compatible object / safe primitive path
+- `long` -> use long-compatible path
+
+Even better:
+- avoid modifying args directly if a safer “after original” approach exists
+
+Practical AI rule:
+- if a hook crashes due to primitive mismatch, prefer post-action augmentation over argument replacement
+
+--------------------------------------------------
+43.7 Recycler/list-row reuse is extremely dangerous
+--------------------------------------------------
+
+Real failures in chat-list style plugins:
+- rows become randomly tiny
+- empty gaps appear
+- wrong rows inherit old alpha/scale/translation
+- things disappear without user action
+
+Cause:
+- Telegram reuses cells
+- plugin mutated visual state on the row itself
+- row got rebound for another chat/message
+
+Strong rule:
+- do not leave `alpha`, `scale`, `translation`, padding, enabled-state or timers on reusable rows
+- if you mutate a cell, reset only plugin-owned state
+- better use an overlay/progress layer than mutating the row layout itself
+
+This is especially important for:
+- `DialogCell`
+- `RecyclerListView` rows
+- reusable message rows
+
+--------------------------------------------------
+43.8 Cancel timers when screen lifecycle changes
+--------------------------------------------------
+
+Another real failure:
+- long-hold timers survive after navigation
+- user opens a chat normally
+- delayed action fires later and causes wrong hide/select/etc.
+
+Rule:
+- any hold timer / delayed action attached to a screen or row must be cancelled on:
+  - `onPause`
+  - `onFragmentDestroy`
+  - touch cancel / pointer release
+
+This is critical for:
+- hidden chats
+- drag/hold selection
+- delayed menu actions
+- prank/troll plugins with delayed triggers
+
+--------------------------------------------------
+43.9 Overlay-first design is often better than perfect native injection
+--------------------------------------------------
+
+Repeated lesson:
+- “perfect native placement” sounds ideal
+- but in practice a safe overlay anchored to the correct host often wins
+
+Examples where overlay-first is good:
+- profile buttons
+- settings panels
+- compact tool strips
+- backdrop layers
+- progress hints
+
+AI rule:
+- if native attach is unstable, choose overlay-first
+- stable and slightly less native > perfect but broken
+
+--------------------------------------------------
+43.10 Root host, parent host, and decorView are different tools
+--------------------------------------------------
+
+Do not treat these as interchangeable.
+
+### `fragmentView`
+Best for:
+- screen-local overlays
+- panels that should scroll/clip with the screen
+
+### Parent host of `fragmentView`
+Best for:
+- elements that need slightly higher positioning than the fragment content
+- overlays just outside the screen’s own content layer
+
+### `decorView`
+Best for:
+- true full-screen backdrops
+- activity-wide overlays
+- stable top-level visual layers
+
+If a plugin needs:
+- full profile backdrop
+- global dim / intro animation
+- topmost overlay independent of content clipping
+
+Then `decorView` can be the correct choice.
+
+--------------------------------------------------
+43.11 Backdrop image logic should be separated from avatar logic
+--------------------------------------------------
+
+Real lesson from profile-visual plugins:
+- using a profile avatar widget directly as if it were a full-screen backdrop can create weird results
+- avatar presentation and backdrop presentation are different jobs
+
+AI rule:
+- if image acts like a background, think in terms of:
+  - cover mode
+  - large host container
+  - scrim
+  - fade
+  - optional blur
+
+Do not assume avatar rendering defaults are good for backgrounds.
+
+--------------------------------------------------
+43.12 BackupImageView vs ImageView
+--------------------------------------------------
+
+Use `BackupImageView` when:
+- the source is Telegram-native image data
+- you want Telegram image loading behavior
+- you need avatar / profile / chat image integration
+
+Use plain `ImageView` when:
+- you already have your own bitmap/file
+- you control the source directly
+- you just need display, not Telegram media loading semantics
+
+AI rule:
+- choose image widget by source semantics, not by habit
+
+--------------------------------------------------
+43.13 For large images, think in terms of “cover stack”
+--------------------------------------------------
+
+A robust visual stack for profile/chat backdrops:
+
+1. image layer
+2. optional blur
+3. scrim / dark overlay
+4. optional glow / tint
+5. content above it
+
+This pattern repeatedly works better than trying to solve readability with alpha only.
+
+--------------------------------------------------
+43.14 In-plugin settings overlays are a first-class pattern
+--------------------------------------------------
+
+Do not think of in-plugin settings overlays as a hack.
+In real ExteraGram plugin work they are often the best solution.
+
+Why:
+- independent of plugin settings screen quirks
+- can be more beautiful
+- can be contextual to current plugin screen
+- can expose richer controls
+
+Very strong use-cases:
+- file editor plugin
+- proxy dashboard
+- music card designer
+- profile visual plugins
+- utility panel plugins
+
+--------------------------------------------------
+43.15 When settings screens are ugly, improve hierarchy before adding more color
+--------------------------------------------------
+
+Real UI lesson:
+- ugly settings are often a structure problem, not a color problem
+
+Improve in this order:
+1. sections
+2. row density
+3. title/subtitle hierarchy
+4. value placement
+5. accent chips/badges
+6. color polish
+
+If values are too long:
+- summarize in the row
+- open the full text in a dialog/detail view
+
+--------------------------------------------------
+43.16 Long values should not live directly in rows
+--------------------------------------------------
+
+Real bug:
+- supported extensions list was rendered directly inside a row value
+- row became enormous
+- settings screen looked broken
+
+Rule:
+- long datasets in settings rows should show:
+  - summary label
+  - count
+  - short compact preview
+  - full text only on tap
+
+Examples:
+- `18376 keywords`
+- `64 formats`
+- `12 favorites`
+
+--------------------------------------------------
+43.17 Use commands as fallback entry points for plugin UI
+--------------------------------------------------
+
+A very strong real-world pattern:
+- even if the plugin has menu items and overlays, also add a command entry
+
+Examples:
+- `.openfile settings`
+- `.vault`
+- `.xsheet`
+
+Why:
+- menu hook can fail
+- user can forget where UI lives
+- command gives deterministic access path
+
+AI rule:
+- serious plugins should often have both:
+  - visible UI/menu path
+  - command fallback path
+
+--------------------------------------------------
+43.18 Remote-loader plugins need correct remote object ownership
+--------------------------------------------------
+
+In GitHub-loader style plugins, one real failure mode is:
+- loader calls payload methods on the loader instance
+- payload expects its own instance methods/fields
+- runtime crashes with missing attributes
+
+Rule:
+- if using remote payload architecture:
+  - create a real payload plugin instance
+  - call lifecycle methods on that payload instance
+  - do not pretend the loader object is the payload object
+
+Also:
+- if minimalism matters, direct payload URL can be simpler than manifest indirection
+- but manifest is better if you need versioning/hash/metadata
+
+--------------------------------------------------
+43.19 Tiny loader architecture: recommended split
+--------------------------------------------------
+
+If user wants:
+- small `.plugin` in ExteraGram
+- main code on GitHub
+
+Recommended split:
+
+### Loader responsibilities
+- metadata
+- fixed remote URL or manifest URL
+- fetch remote code
+- cache code locally
+- instantiate payload plugin
+- forward lifecycle calls
+
+### Payload responsibilities
+- all real plugin logic
+- settings
+- hooks
+- menus
+- commands
+
+### Optional manifest responsibilities
+- version
+- hash
+- payload URL
+- compatibility metadata
+
+--------------------------------------------------
+43.20 Public GitHub direct payload is not secret
+--------------------------------------------------
+
+Operational lesson:
+- if loader downloads payload from public GitHub, users can find the payload
+- even private GitHub is not secure if credentials/token must be shipped in the plugin
+
+AI rule:
+- do not describe public raw GitHub as secret distribution
+- if secrecy is required, a server/proxy is needed
+
+--------------------------------------------------
+43.21 Debug-friendly plugins are much easier to stabilize
+--------------------------------------------------
+
+When a feature is risky:
+- log class availability
+- log attach success/failure
+- log key branch decisions
+- log callback start/end
+
+Good logging pattern:
+- short prefix
+- no spam in hot loops
+- enough context to identify the failing stage
+
+Examples:
+- hook attached?
+- fragment found?
+- file path resolved?
+- Java list size?
+- send helper returned?
+
+--------------------------------------------------
+43.22 Real plugin generation should use “stability ladder”
+--------------------------------------------------
+
+For every requested feature:
+
+1. verified helper path
+2. lifecycle-safe overlay path
+3. local class probe path
+4. internal reflection path
+5. abandon/limit feature if still unverified
+
+This should be the default AI decision ladder.
+
+==================================================
+44. ADVANCED TELEGRAM / EXTERAGRAM TARGET MAP
+==================================================
+
+This section expands the class map with additional targets frequently useful for ambitious plugins.
+
+--------------------------------------------------
+44.1 Additional upstream classes worth checking conceptually
+--------------------------------------------------
+
+`BaseFragment.java`
+- fragment lifecycle model
+- screen presentation rules
+- useful for understanding fragment-managed screens
+
+Upstream:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/BaseFragment.java
+
+`ActionBarLayout.java`
+- fragment navigation stack
+- screen transitions
+- useful when plugin behavior depends on present/dismiss/navigation timing
+
+Upstream:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/ActionBar/ActionBarLayout.java
+
+`SharedMediaLayout.java`
+- profile/chat media sections
+- useful when anchoring around music/media/publication blocks
+
+Upstream:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/SharedMediaLayout.java
+
+`ChatAvatarContainer.java`
+- chat header container
+- useful for header-adjacent buttons in chat screen
+
+Upstream:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatAvatarContainer.java
+
+`PasscodeView.java`
+- authentication/passcode UI concept
+- relevant for secure or gated plugin ideas
+
+Upstream:
+https://github.com/DrKLO/Telegram/blob/master/TMessagesProj/src/main/java/org/telegram/ui/Components/PasscodeView.java
+
+--------------------------------------------------
+44.2 Local ExteraGram class probes strongly suggested by practice
+--------------------------------------------------
+
+If feature category is:
+
+### profile enhancement
+- `ProfileActivity`
+- `SharedMediaLayout`
+- `fragmentView`
+- `musicView`
+- `contentView`
+
+### chat header enhancement
+- `ChatActivity`
+- `ChatAvatarContainer`
+- `contentView`
+- `fragmentView`
+
+### secure/gated flow
+- `PasscodeView`
+- `PasscodeActivity`
+- `showPasscodeActivity`
+- `addOverlayPasscodeView`
+
+### chat list behavior
+- `DialogsActivity`
+- `DialogCell`
+- `RecyclerListView`
+- `performLongClick`
+- `dispatchTouchEvent`
+
+### visual destruction effects
+- `ThanosEffect`
+- any `kill(...)` / effect methods
+
+AI rule:
+- if local build exposes one of these names, it becomes a much stronger candidate than a generic guess
+
+--------------------------------------------------
+44.3 High-value local field names from practice
+--------------------------------------------------
+
+Beyond the usual common fields, these were especially valuable in real plugin work:
+
+- `contentView`
+- `pinnedMessageView`
+- `musicView`
+- `sharedMediaLayout`
+- `currentAccount`
+- `currentDialogId`
+- `pluginsDir`
+- `pluginsQueue`
+- `fragmentView`
+
+Why they matter:
+- they often unlock stable attach points or controller paths
+
+==================================================
+45. PRACTICAL RECIPES FROM REAL PLUGINS
+==================================================
+
+--------------------------------------------------
+45.1 Recipe: robust file editor plugin
+--------------------------------------------------
+
+Use this structure:
+
+1. Command entry:
+   - `.openfile`
+   - optional `.newfile`
+   - optional `.openfile settings`
+
+2. File validation:
+   - check reply
+   - check document exists locally
+   - detect likely text file
+   - validate size limit
+
+3. Decoding:
+   - preferred encoding
+   - fallback encodings
+   - safe error UI
+
+4. Editor UI:
+   - built-in overlay
+   - line numbers
+   - wrap
+   - read-only mode
+   - rename
+   - copy all
+   - save/send
+
+5. Sending:
+   - write temp file
+   - preserve chosen filename
+   - use verified send helper
+
+6. Settings:
+   - in-plugin overlay if normal settings are unstable
+
+--------------------------------------------------
+45.2 Recipe: robust hidden chats plugin
+--------------------------------------------------
+
+Use this structure:
+
+1. Dialog list filter path
+2. Safe hide gesture path
+3. Vault UI path
+4. Cleanup path
+
+Critical safeguards:
+- do not mutate reusable row state permanently
+- cancel hold timers on pause/destroy
+- avoid fallback row animations that leave transforms behind
+- build vault UI as its own screen/overlay instead of abusing the row list
+
+--------------------------------------------------
+45.3 Recipe: robust profile visual plugin
+--------------------------------------------------
+
+Use this structure:
+
+1. Resolve source image:
+   - custom file
+   - avatar fallback
+
+2. Choose host:
+   - `fragmentView`
+   - parent host
+   - `decorView` if needed
+
+3. Use dedicated visual stack:
+   - image
+   - optional blur
+   - scrim
+   - glow/fade
+
+4. Keep avatar and profile content untouched
+
+5. Expose user controls:
+   - alpha
+   - scale
+   - blur
+   - scrim
+
+--------------------------------------------------
+45.4 Recipe: rich report/statistics plugin
+--------------------------------------------------
+
+Use this structure:
+
+1. Collect local runtime data
+2. Normalize Java collections safely
+3. Produce:
+   - compact summary
+   - rich report
+   - mono blocks / quote blocks / bold headers
+
+4. Avoid dumping raw giant content directly
+
+5. If showing “largest message” or similar:
+   - summarize length and metadata
+   - do not blindly include raw full text
+
+==================================================
+46. DANGEROUS ANTI-PATTERNS TO AVOID
+==================================================
+
+These are high-signal anti-patterns extracted from actual plugin failures.
+
+Do not:
+- assume Java `ArrayList` is Python-iterable
+- assume selector/default types are automatically normalized
+- inject giant raw lists directly into a settings row
+- modify reusable list row transforms and forget to reset them
+- keep delayed hold timers alive after navigation
+- replace primitive Java args with wrong boxed types
+- use internal send reflection when verified helper exists
+- attach deep native UI into an unstable screen host just for perfection
+- assume a GitHub remote payload is private if the loader can fetch it publicly
+- assume upstream Telegram source names are runtime proof
+- use standard settings screen as the only control surface for complex plugins
+
+==================================================
+47. FINAL GENERATION HEURISTIC
+==================================================
+
+When generating a plugin, the AI should now reason with all of the following layers:
+
+1. Verified ExteraGram runtime API
+2. Official Telegram source structure
+3. Observed community corpus patterns
+4. Real plugin iteration lessons from sections 43-46
+
+This combined heuristic should produce plugins which are:
+- more stable
+- less hallucinated
+- more Telegram-native
+- easier to debug
+- safer under Chaquopy/Java interop constraints
+- better at choosing between native attach and overlay fallback
+
+If forced to choose between:
+- ambitious but brittle
+- slightly simpler but stable
+
+the AI should choose stable by default.
+
+==================================================
+48. READY-MADE VERIFIED SKELETONS
+==================================================
+
+This section gives the AI high-quality plugin skeletons.
+They are not meant to be copy-pasted blindly without adapting names and logic.
+They are meant to eliminate hallucination and speed up correct structure.
+
+--------------------------------------------------
+48.1 Minimal utility plugin skeleton
+--------------------------------------------------
+
+Use when:
+- user wants a simple command plugin
+- no deep hooks are required
+- plugin mainly performs one action
+
+```py
+__id__ = "my_plugin_id"
+__name__ = "My Plugin"
+__description__ = "Short plugin description."
+__version__ = "1.0.0"
+__author__ = "Author"
+__min_version__ = "11.12.0"
+
+from base_plugin import BasePlugin, HookResult, HookStrategy
+from android_utils import run_on_ui_thread, log
+from ui.bulletin import BulletinHelper
+
+
+class Plugin(BasePlugin):
+    def on_plugin_load(self):
+        pass
+
+    def on_send_message_hook(self, account, params):
+        text = str(getattr(params, "message", "") or "").strip()
+        if text.lower() != ".mycmd":
+            return HookResult()
+
+        run_on_ui_thread(lambda: BulletinHelper.show_success("Done."))
+        return HookResult(strategy=HookStrategy.CANCEL)
+```
+
+--------------------------------------------------
+48.2 Menu-driven plugin skeleton
+--------------------------------------------------
+
+Use when:
+- user wants a button in drawer/chat/profile/message menu
+- plugin should open some UI or perform one action from a menu
+
+```py
+from base_plugin import BasePlugin, MenuItemData, MenuItemType
+from ui.bulletin import BulletinHelper
+from android_utils import run_on_ui_thread
+
+
+class Plugin(BasePlugin):
+    def on_plugin_load(self):
+        self.add_menu_item(
+            MenuItemData(
+                menu_type=MenuItemType.CHAT_ACTION_MENU,
+                text="Open Tool",
+                icon="msg_settings",
+                item_id="my_tool_open",
+                on_click=self._open_tool,
+            )
+        )
+
+    def _open_tool(self, _context=None):
+        run_on_ui_thread(lambda: BulletinHelper.show_info("Tool opened."))
+```
+
+--------------------------------------------------
+48.3 Settings-first utility plugin skeleton
+--------------------------------------------------
+
+Use when:
+- plugin has toggles/inputs/selectors
+- standard settings screen is likely enough
+
+```py
+from base_plugin import BasePlugin
+from ui.settings import Header, Switch, Input, Selector, Text
+
+DEFAULTS = {
+    "enabled": True,
+    "command_prefix": ".tool",
+    "mode": 0,
+}
+
+
+class Plugin(BasePlugin):
+    def create_settings(self):
+        return [
+            Header(text="Tool Settings"),
+            Switch(
+                key="enabled",
+                text="Enable plugin",
+                default=DEFAULTS["enabled"]
+            ),
+            Input(
+                key="command_prefix",
+                text="Command prefix",
+                default=DEFAULTS["command_prefix"]
+            ),
+            Selector(
+                key="mode",
+                text="Mode",
+                items=["A", "B", "C"],
+                default=DEFAULTS["mode"]
+            ),
+            Text(text="Use the command shown above to open the plugin.")
+        ]
+```
+
+--------------------------------------------------
+48.4 In-plugin overlay settings skeleton
+--------------------------------------------------
+
+Use when:
+- plugin settings screen is unstable
+- plugin needs a richer settings UI
+- user wants settings inside the plugin itself
+
+```py
+def _show_settings_overlay(self):
+    fragment = get_last_fragment()
+    if fragment is None:
+        return
+    activity = fragment.getParentActivity()
+    if activity is None:
+        return
+
+    root = FrameLayout(activity)
+    root.setLayoutParams(FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT
+    ))
+
+    panel = LinearLayout(activity)
+    panel.setOrientation(LinearLayout.VERTICAL)
+    panel.setPadding(dp(12), dp(12), dp(12), dp(12))
+
+    # add title, rows, buttons here
+
+    root.addView(panel, FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT
+    ))
+
+    decor = activity.getWindow().getDecorView()
+    decor.addView(root)
+```
+
+--------------------------------------------------
+48.5 UI lifecycle attachment skeleton
+--------------------------------------------------
+
+Use when:
+- plugin injects UI into an existing Telegram screen
+
+```py
+class AttachHook(MethodHook):
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    def after_hooked_method(self, param):
+        self.plugin._schedule_attach(param.thisObject)
+
+
+class DestroyHook(MethodHook):
+    def __init__(self, plugin):
+        self.plugin = plugin
+
+    def before_hooked_method(self, param):
+        self.plugin._detach_ui(param.thisObject)
+
+
+class Plugin(BasePlugin):
+    def __init__(self):
+        super().__init__()
+        self._attached = {}
+        self._unhooks = []
+
+    def on_plugin_load(self):
+        cls = find_class("org.telegram.ui.ProfileActivity")
+        self._unhooks.extend(self.hook_all_methods(cls, "createView", AttachHook(self)) or [])
+        self._unhooks.extend(self.hook_all_methods(cls, "onResume", AttachHook(self)) or [])
+        self._unhooks.extend(self.hook_all_methods(cls, "onFragmentDestroy", DestroyHook(self)) or [])
+```
+
+--------------------------------------------------
+48.6 Full-screen backdrop skeleton
+--------------------------------------------------
+
+Use when:
+- plugin needs a full-screen visual layer
+- backdrop / dim / intro / photo overlay is required
+
+```py
+def _attach_backdrop(self, fragment):
+    root = self._find_fragment_root(fragment)
+    if root is None:
+        return
+    activity = fragment.getParentActivity()
+    if activity is None:
+        return
+
+    decor = activity.getWindow().getDecorView()
+    holder = FrameLayout(activity)
+
+    image = ImageView(activity)
+    image.setScaleType(ImageView.ScaleType.CENTER_CROP)
+
+    scrim = View(activity)
+    scrim.setBackgroundColor(Color.argb(120, 12, 10, 16))
+
+    holder.addView(image, FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT
+    ))
+    holder.addView(scrim, FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT
+    ))
+
+    decor.addView(holder, FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT
+    ))
+```
+
+--------------------------------------------------
+48.7 Safe send-document skeleton
+--------------------------------------------------
+
+Use when:
+- plugin edits a file
+- plugin exports a generated file
+- plugin wants stable document sending
+
+```py
+from client_utils import send_document
+
+
+def _send_result(self, path, peer_id, reply_to_msg_id=0):
+    try:
+        send_document(
+            path=path,
+            peer=peer_id,
+            replyToMsg=reply_to_msg_id,
+        )
+        BulletinHelper.show_success("File sent.")
+    except Exception as e:
+        BulletinHelper.show_error(f"Send failed: {type(e).__name__}")
+```
+
+--------------------------------------------------
+48.8 Safe Java list iteration skeleton
+--------------------------------------------------
+
+Use when:
+- plugin touches Java lists from Telegram runtime
+
+```py
+def java_list_iter(values):
+    if values is None:
+        return
+    try:
+        size = int(values.size() or 0)
+    except Exception:
+        return
+    for i in range(size):
+        try:
+            yield values.get(i)
+        except Exception:
+            continue
+```
+
+--------------------------------------------------
+48.9 Remote loader skeleton
+--------------------------------------------------
+
+Use when:
+- user explicitly wants a tiny plugin file
+- payload lives on GitHub
+
+```py
+__id__ = "remote_loader"
+__name__ = "Remote Loader"
+
+PAYLOAD_URL = "https://raw.githubusercontent.com/user/repo/main/payload.py"
+
+import types
+import urllib.request
+from base_plugin import BasePlugin
+
+
+class Plugin(BasePlugin):
+    def __init__(self):
+        super().__init__()
+        self._payload = None
+
+    def _load_payload(self):
+        if self._payload is not None:
+            return self._payload
+        code = urllib.request.urlopen(PAYLOAD_URL, timeout=10).read().decode("utf-8")
+        module = types.ModuleType("remote_payload")
+        exec(compile(code, "remote_payload.py", "exec"), module.__dict__)
+        payload_cls = getattr(module, "Plugin", None)
+        if payload_cls is None:
+            raise RuntimeError("Remote payload has no Plugin class")
+        self._payload = payload_cls()
+        return self._payload
+```
+
+==================================================
+49. REUSABLE HELPER SNIPPETS
+==================================================
+
+These snippets are small, high-value pieces the AI should reuse often.
+
+--------------------------------------------------
+49.1 Safe numeric parsing
+--------------------------------------------------
+
+```py
+def safe_int(value, default=0):
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def safe_float(value, default=0.0):
+    try:
+        return float(str(value).replace(",", "."))
+    except Exception:
+        return default
+```
+
+--------------------------------------------------
+49.2 Safe fragment root resolution
+--------------------------------------------------
+
+```py
+def _find_fragment_root(self, fragment):
+    if fragment is None:
+        return None
+    try:
+        root = fragment.getFragmentView()
+        if root is not None:
+            return root
+    except Exception:
+        pass
+    try:
+        return get_private_field(fragment, "fragmentView")
+    except Exception:
+        return None
+```
+
+--------------------------------------------------
+49.3 Safe theme color fallback
+--------------------------------------------------
+
+```py
+def theme_color(theme_cls, key_name, fallback):
+    if theme_cls is None:
+        return fallback
+    try:
+        return theme_cls.getColor(getattr(theme_cls, key_name))
+    except Exception:
+        return fallback
+```
+
+--------------------------------------------------
+49.4 Safe string cleanup
+--------------------------------------------------
+
+```py
+def cleanup_text(value):
+    return str(value or "").strip()
+```
+
+--------------------------------------------------
+49.5 Safe boolean label
+--------------------------------------------------
+
+```py
+def bool_label(value, ru=True):
+    if ru:
+        return "Вкл" if value else "Выкл"
+    return "On" if value else "Off"
+```
+
+--------------------------------------------------
+49.6 Safe host decision helper
+--------------------------------------------------
+
+```py
+def pick_host(fragment, root):
+    try:
+        activity = fragment.getParentActivity()
+        if activity is not None:
+            decor = activity.getWindow().getDecorView()
+            if decor is not None:
+                return decor
+    except Exception:
+        pass
+    try:
+        parent = root.getParent()
+        if parent is not None:
+            return parent
+    except Exception:
+        pass
+    return root
+```
+
+--------------------------------------------------
+49.7 Safe command prefix check
+--------------------------------------------------
+
+```py
+def message_startswith(params, prefix):
+    text = str(getattr(params, "message", "") or "").strip()
+    return text.lower().startswith(prefix.lower())
+```
+
+--------------------------------------------------
+49.8 Safe settings normalization helper
+--------------------------------------------------
+
+```py
+def ensure_defaults(plugin, defaults):
+    for key, value in defaults.items():
+        try:
+            current = plugin.get_setting(key, None)
+            if current is None:
+                plugin.set_setting(key, value)
+        except Exception:
+            pass
+```
+
+==================================================
+50. TASK → HOOK / SCREEN / HOST DECISION TABLE
+==================================================
+
+Use this as a fast planning table.
+
+--------------------------------------------------
+50.1 If user wants profile UI
+--------------------------------------------------
+
+Likely screen:
+- `ProfileActivity`
+
+First hooks to try:
+- `createView`
+- `onResume`
+- `onFragmentDestroy`
+
+Likely hosts:
+- `fragmentView`
+- parent of `fragmentView`
+- `decorView` for backdrop/fullscreen layer
+
+Likely helper components:
+- `BackupImageView`
+- `AvatarDrawable`
+- `ImageLocation`
+- `Theme`
+
+--------------------------------------------------
+50.2 If user wants chat list behavior
+--------------------------------------------------
+
+Likely screen:
+- `DialogsActivity`
+
+First hooks to try:
+- `createView`
+- `onResume`
+- `onPause`
+- `onFragmentDestroy`
+
+Deeper targets:
+- `DialogCell`
+- `RecyclerListView`
+
+Likely hosts:
+- list overlay
+- root screen overlay
+
+--------------------------------------------------
+50.3 If user wants chat header/panel
+--------------------------------------------------
+
+Likely screen:
+- `ChatActivity`
+
+First hooks to try:
+- `createView`
+- `onResume`
+- `onFragmentDestroy`
+
+Probe targets:
+- `contentView`
+- `fragmentView`
+- `ChatAvatarContainer`
+
+Likely host order:
+- native header container
+- content/root overlay
+
+--------------------------------------------------
+50.4 If user wants file/media send logic
+--------------------------------------------------
+
+Likely structural sources:
+- `SendMessagesHelper`
+- `MessageObject`
+
+Preferred runtime path:
+- verified send helper
+
+Avoid first:
+- reflection-heavy internal send calls
+
+--------------------------------------------------
+50.5 If user wants secure/auth/protected action
+--------------------------------------------------
+
+Probe targets:
+- `PasscodeView`
+- `PasscodeActivity`
+- stars/reaction/gift classes
+
+Preferred design:
+- intercept action trigger
+- authenticate
+- then continue
+
+==================================================
+51. PRE-RETURN QUALITY CHECKLIST FOR THE AI
+==================================================
+
+Before returning a plugin, the AI should mentally check:
+
+### Structure
+- metadata present?
+- `class Plugin(BasePlugin):` present?
+- imports only from verified runtime or safe Android/Java classes?
+
+### Hook correctness
+- callback names canonical?
+- hook signatures correct?
+- cleanup path present for UI/timers?
+
+### Java interop
+- any Java list treated safely?
+- any primitive arg replacement risky?
+- any null/None paths guarded?
+
+### UI
+- attach host chosen safely?
+- if screen UI is unstable, is there overlay fallback?
+- if row/list mutation exists, does reset logic exist?
+
+### Settings
+- defaults normalized?
+- selectors and inputs use type-correct values?
+- long values summarized instead of dumped directly?
+
+### Sending / actions
+- verified helper preferred if available?
+- file name/path preserved?
+- user-visible errors handled?
+
+### Stability
+- feature degrades safely if one class/field is missing?
+- plugin still loads even if optional visual enhancement fails?
+
+==================================================
+52. FINAL OUTPUT BLUEPRINT
+==================================================
+
+When the user asks for a plugin, the AI should aim to produce output with this internal shape:
+
+1. Metadata
+2. Imports
+3. Small helpers
+4. Hook/helper classes if needed
+5. `Plugin` class
+6. Lifecycle / settings / menu registration
+7. Main feature logic
+8. Cleanup logic
+
+Preferred properties of the final code:
+- one file
+- readable
+- defensive
+- stable
+- no invented API
+- conservative with internals
+- Telegram-native where useful
+
+==================================================
+53. FINAL MASTER RULE
+==================================================
+
+The strongest ExteraGram plugin generator is not the one that knows the most names.
+It is the one that knows:
+
+- which names are verified
+- which names come from source guidance only
+- which hooks are lifecycle-safe
+- which UI path is stable
+- which Java interop traps are dangerous
+- and when to stop escalating complexity
+
+If the AI follows sections 0-53 well, it should be able to generate:
+- simple utility plugins
+- UI tweaks
+- profile enhancements
+- chat overlays
+- file tools
+- settings-heavy tools
+- remote-loader architectures
+- report/statistics plugins
+
+with much lower hallucination and much higher runtime stability.

@@ -1,0 +1,1568 @@
+__id__ = "minesweeper_game_pg"
+__name__ = "Minesweeper Game"
+__description__ = "Классическая игра 'Сапёр' с красивым интерфейсом, таймером, уровнями сложности, настраиваемыми темами оформления, режимом 'Без флагов', функциями **отмены/повтора хода**, **пользовательской настройкой поля**, **расширенной статистикой** и **подсказками**. Отслеживайте свои лучшие времена и достижения!\n\nЗапускается из меню действий в чате (три точки)."
+__version__ = "3.1.5"
+__author__ = "@JavaScript_XD & @PluginIDEbot"
+__icon__ = "sPluginIDE/41"
+__min_version__ = "11.12.1"
+
+import random
+import time
+import threading
+import json
+import traceback
+from functools import partial
+from typing import Any, Optional, List, Tuple
+
+from base_plugin import BasePlugin, MenuItemData, MenuItemType
+from hook_utils import find_class
+from java import dynamic_proxy
+from android_utils import run_on_ui_thread, log
+from client_utils import get_last_fragment
+from ui.alert import AlertDialogBuilder
+from ui.bulletin import BulletinHelper
+from ui.settings import Header, Selector, Text, Divider, Input
+
+from android.view import View, Gravity, WindowManager, MotionEvent
+from android.widget import Button, TextView, LinearLayout, GridLayout, HorizontalScrollView
+from android.graphics import Color, Typeface
+from android.graphics.drawable import GradientDrawable, ColorDrawable
+from android.content import Context
+from android.media import AudioManager, ToneGenerator
+from android.os import Vibrator, Build, VibrationEffect
+from com.exteragram.messenger.plugins import PluginsController
+from com.exteragram.messenger.plugins.ui import PluginSettingsActivity
+
+# Сгенерировано в PluginGRT - @PluginIDEbot
+# <(^_^<)
+# --- Константы и Настройки ---
+DIFFICULTY_LEVELS = {
+    0: {"name": "Новичок", "width": 9, "height": 9, "mines": 10},
+    1: {"name": "Любитель", "width": 16, "height": 16, "mines": 40},
+    2: {"name": "Профессионал", "width": 30, "height": 16, "mines": 99},
+    3: {"name": "Пользовательский", "width": 10, "height": 10, "mines": 15},
+}
+
+# Режимы игры
+MODE_NORMAL = 0
+MODE_NO_FLAGS = 1
+GAME_MODES = {
+    MODE_NORMAL: {"name": "Обычный (с флагами)"},
+    MODE_NO_FLAGS: {"name": "Без флагов"}
+}
+
+THEMES = {
+    "Классическая тёмная": {
+        "bg": "#222831", "header": "#393E46", "grid": "#303640",
+        "cell_covered": "#4A5361", "cell_revealed": "#393E46", "cell_flash": "#6B768B",
+        "text_hint": "#888888", "text_timer": "#FFD369", "text_flag": "#FF6B6B",
+        "bomb": "#D63447", "exit": "#CCCCCC", "win": "#5DD293",
+        "btn_normal": "#5A626F", "btn_pressed": "#777777", "btn_text": "#FFFFFF"
+    },
+    "Арктическая светлая": {
+        "bg": "#F4F6F8", "header": "#E8ECEF", "grid": "#DEE3E8",
+        "cell_covered": "#C8D1DB", "cell_revealed": "#E8ECEF", "cell_flash": "#A5B2C0",
+        "text_hint": "#777777", "text_timer": "#2E86C1", "text_flag": "#E74C3C",
+        "bomb": "#D35400", "exit": "#444444", "win": "#2ECC71",
+        "btn_normal": "#B0BDCB", "btn_pressed": "#D8E0EB", "btn_text": "#333333"
+    },
+    "Океан": {
+        "bg": "#0D1B2A", "header": "#1B263B", "grid": "#152030",
+        "cell_covered": "#415A77", "cell_revealed": "#1B263B", "cell_flash": "#6D8FAB",
+        "text_hint": "#A9B4C2", "text_timer": "#E0E1DD", "text_flag": "#FF9F1C",
+        "bomb": "#E71D36", "exit": "#E0E1DD", "win": "#2EC4B6",
+        "btn_normal": "#415A77", "btn_pressed": "#5A708D", "btn_text": "#E0E1DD"
+    },
+    "Вампир": {
+        "bg": "#121212", "header": "#1E1E1E", "grid": "#181818",
+        "cell_covered": "#4B0000", "cell_revealed": "#1E1E1E", "cell_flash": "#750000",
+        "text_hint": "#757575", "text_timer": "#CF6679", "text_flag": "#F2A365",
+        "bomb": "#FF4500", "exit": "#BB86FC", "win": "#03DAC6",
+        "btn_normal": "#3A0000", "btn_pressed": "#5D0000", "btn_text": "#FFFFFF"
+    },
+    "Джунгли": {
+        "bg": "#1C2823", "header": "#28372C", "grid": "#223028",
+        "cell_covered": "#4A604F", "cell_revealed": "#28372C", "cell_flash": "#6B856E",
+        "text_hint": "#B0C4B1", "text_timer": "#D4ED9C", "text_flag": "#E76F51",
+        "bomb": "#A83F20", "exit": "#A3B3A6", "win": "#81B214",
+        "btn_normal": "#4A604F", "btn_pressed": "#6B856E", "btn_text": "#FFFFFF"
+    },
+    "Космос": {
+        "bg": "#0A101C", "header": "#172031", "grid": "#121827",
+        "cell_covered": "#2B3A5A", "cell_revealed": "#172031", "cell_flash": "#414E73",
+        "text_hint": "#8D9BAF", "text_timer": "#7BCCDA", "text_flag": "#E63946",
+        "bomb": "#F4A261", "exit": "#9DB2CE", "win": "#6A7FDB",
+        "btn_normal": "#2B3A5A", "btn_pressed": "#414E73", "btn_text": "#E0E1DD"
+    }
+}
+
+SOUND_OPTIONS = {
+    "Без звука": -1,
+    "Короткий клик (DTMF_0)": ToneGenerator.TONE_DTMF_0,
+    "Мягкий сигнал (CDMA_SOFT_ERROR_LITE)": ToneGenerator.TONE_CDMA_SOFT_ERROR_LITE,
+    "Подтверждение (PROP_ACK)": ToneGenerator.TONE_PROP_ACK,
+    "Тихий звонок (CDMA_CONFIRM)": ToneGenerator.TONE_CDMA_CONFIRM,
+    "Быстрый импульс (CDMA_ABBR_ALERT)": ToneGenerator.TONE_CDMA_ABBR_ALERT,
+}
+
+
+STATE_COVERED = 0
+STATE_REVEALED = 1
+STATE_FLAGGED = 2
+
+# --- Прокси для обработчиков событий ---
+View_OnClickListener = find_class("android.view.View$OnClickListener")
+class _ClickListener(dynamic_proxy(View_OnClickListener)):
+    def __init__(self, callback):
+        super().__init__()
+        self.callback = callback
+    def onClick(self, view: View):
+        try:
+            self.callback(view)
+        except Exception:
+            log(f"[{__id__}] ClickListener Error: {traceback.format_exc()}")
+
+View_OnLongClickListener = find_class("android.view.View$OnLongClickListener")
+class _LongClickListener(dynamic_proxy(View_OnLongClickListener)):
+    def __init__(self, callback):
+        super().__init__()
+        self.callback = callback
+    def onLongClick(self, view: View):
+        try:
+            return self.callback(view)
+        except Exception:
+            log(f"[{__id__}] LongClickListener Error: {traceback.format_exc()}")
+            return False
+
+View_OnTouchListener = find_class("android.view.View$OnTouchListener")
+class _TouchListener(dynamic_proxy(View_OnTouchListener)):
+    def __init__(self, callback):
+        super().__init__()
+        self.callback = callback
+    def onTouch(self, view: View, event: Any):
+        try:
+            return self.callback(view, event)
+        except Exception:
+            log(f"[{__id__}] TouchListener Error: {traceback.format_exc()}")
+            return False
+
+# --- NEW: History State for Undo/Redo ---
+class GameState:
+    def __init__(self, game_instance: 'MinesweeperGame', plugin_instance: 'MinesweeperPlugin'):
+        self.board = [row[:] for row in game_instance.board]
+        self.visible_board = [row[:] for row in game_instance.visible_board]
+        self.mines_locations = set(game_instance.mines_locations)
+        self.flags_count = game_instance.flags_count
+        self.is_first_click = game_instance.is_first_click
+        self.game_over = game_instance.game_over
+        self.game_won = game_instance.game_won
+        self.hint_used_in_current_game = game_instance.hint_used_in_current_game # NEW: Hint state
+        self.game_time = plugin_instance.game_time
+        self.game_paused = plugin_instance.game_paused # NEW: Pause state for timer logic
+
+    def apply_to(self, game_instance: 'MinesweeperGame', plugin_instance: 'MinesweeperPlugin'):
+        game_instance.board = [row[:] for row in self.board]
+        game_instance.visible_board = [row[:] for row in self.visible_board]
+        game_instance.mines_locations = set(self.mines_locations)
+        game_instance.flags_count = self.flags_count
+        game_instance.is_first_click = self.is_first_click
+        game_instance.game_over = self.game_over
+        game_instance.game_won = self.game_won
+        game_instance.hint_used_in_current_game = self.hint_used_in_current_game # NEW: Apply hint state
+        plugin_instance.game_time = self.game_time # Apply saved time
+        plugin_instance.game_paused = self.game_paused # NEW: Apply pause state
+
+# --- Класс Игровой Логики ---
+class MinesweeperGame:
+    def __init__(self, width: int, height: int, mines: int):
+        self.width = width
+        self.height = height
+        self.mines = mines
+        self.reset()
+
+    def reset(self):
+        self.board = [[0 for _ in range(self.width)] for _ in range(self.height)]
+        self.visible_board = [[STATE_COVERED for _ in range(self.width)] for _ in range(self.height)]
+        self.mines_locations = set()
+        self.flags_count = 0
+        self.is_first_click = True
+        self.game_over = False
+        self.game_won = False
+        self.hint_used_in_current_game = False # NEW: Flag for hint usage
+        # --- NEW: History for Undo/Redo ---
+        self.history: List[GameState] = []
+        self.history_index = -1
+
+    def setup_board(self, safe_x: int, safe_y: int):
+        possible_locations = []
+        for r in range(self.height):
+            for c in range(self.width):
+                # Ensure the first click and its immediate neighbours are safe
+                if abs(r - safe_y) > 1 or abs(c - safe_x) > 1:
+                    possible_locations.append((r, c))
+        
+        num_mines = min(self.mines, len(possible_locations))
+        self.mines_locations = set(random.sample(possible_locations, num_mines))
+        
+        for r in range(self.height):
+            for c in range(self.width):
+                if (r, c) in self.mines_locations:
+                    self.board[r][c] = -1 # -1 represents a mine
+                    continue
+                count = 0
+                for dr in range(-1, 2):
+                    for dc in range(-1, 2):
+                        if dr == 0 and dc == 0: continue
+                        nr, nc = r + dr, c + dc
+                        if 0 <= nr < self.height and 0 <= nc < self.width and (nr, nc) in self.mines_locations:
+                            count += 1
+                self.board[r][c] = count
+        self.is_first_click = False
+
+    def reveal(self, x: int, y: int):
+        if self.game_over or not (0 <= y < self.height and 0 <= x < self.width) or self.visible_board[y][x] != STATE_COVERED:
+            return
+        if self.is_first_click:
+            self.setup_board(x, y)
+        self.visible_board[y][x] = STATE_REVEALED
+        if self.board[y][x] == -1:
+            self.game_over = True
+            self.game_won = False
+            return
+        if self.board[y][x] == 0:
+            for dr in range(-1, 2):
+                for dc in range(-1, 2):
+                    self.reveal(x + dc, y + dr) # Рекурсивно открываем соседние пустые клетки
+        self.check_win()
+
+    def toggle_flag(self, x: int, y: int):
+        if self.game_over or not (0 <= y < self.height and 0 <= x < self.width) or self.visible_board[y][x] == STATE_REVEALED:
+            return
+        if self.visible_board[y][x] == STATE_COVERED:
+            self.visible_board[y][x] = STATE_FLAGGED
+            self.flags_count += 1
+        elif self.visible_board[y][x] == STATE_FLAGGED:
+            self.visible_board[y][x] = STATE_COVERED
+            self.flags_count -= 1
+            
+    def check_win(self):
+        revealed_count = 0
+        for r in range(self.height):
+            for c in range(self.width):
+                if self.visible_board[r][c] == STATE_REVEALED:
+                    revealed_count += 1
+        if revealed_count == (self.width * self.height) - len(self.mines_locations):
+            self.game_over = True
+            self.game_won = True
+            for r, c in self.mines_locations:
+                # Автоматически помечаем оставшиеся мины флагами при победе
+                if self.visible_board[r][c] != STATE_REVEALED:
+                    self.visible_board[r][c] = STATE_FLAGGED
+            self.flags_count = len(self.mines_locations) # Обновляем счетчик флагов
+
+    def perform_chord_action(self, x: int, y: int) -> bool: # Returns True if a mine was hit
+        if self.game_over or self.visible_board[y][x] != STATE_REVEALED or self.board[y][x] <= 0:
+            return False # Not a valid cell for chord action
+
+        flags_around = 0
+        for dr in range(-1, 2):
+            for dc in range(-1, 2):
+                if dr == 0 and dc == 0: continue
+                nr, nc = y + dr, x + dc # nr - new row (y), nc - new column (x)
+                if 0 <= nr < self.height and 0 <= nc < self.width:
+                    if self.visible_board[nr][nc] == STATE_FLAGGED:
+                        flags_around += 1
+        
+        if flags_around == self.board[y][x]:
+            mine_hit = False
+            for dr in range(-1, 2):
+                for dc in range(-1, 2):
+                    if dr == 0 and dc == 0: continue
+                    nr, nc = y + dr, x + dc
+                    if 0 <= nr < self.height and 0 <= nc < self.width and \
+                       self.visible_board[nr][nc] == STATE_COVERED: # Only reveal covered, unflaged cells
+                        
+                        original_game_over = self.game_over # Сохраняем состояние игры до раскрытия
+                        self.reveal(nc, nr) # reveal(x, y)
+                        if self.game_over and not original_game_over: # Мина была взорвана этим раскрытием
+                            mine_hit = True
+            self.check_win() # Проверяем условие победы после всех раскрытий
+            return mine_hit # Возвращаем, была ли взорвана мина во время аккорда
+        return False # Аккорд не привел к подрыву на мине
+
+# --- Класс Плагина ---
+class MinesweeperPlugin(BasePlugin):
+    def __init__(self):
+        super().__init__()
+        self.game_instance: Optional[MinesweeperGame] = None
+        self.pg_dialog_main = None
+        self.pg_dialog_menu = None
+        self.pg_dialog_rules = None
+        self.activity = None
+        self.cell_buttons: List[List[Button]] = []
+        self.timer_view = None
+        self.flags_view = None
+        self.status_button_view = None
+        self.pg_game_thread: Optional[threading.Thread] = None
+        self.timer_stop_event = threading.Event()
+        self.game_paused = False
+        self.game_time = 0
+        self.AndroidUtilities = find_class("org.telegram.messenger.AndroidUtilities")
+        self.pg_tone_generator: Optional[ToneGenerator] = None
+        self.pg_vibrator: Optional[Vibrator] = None
+        self.last_game_state = None # Для сохранения состояния игры при сворачивании/разворачивании
+
+    def _get_color(self, key: str) -> int:
+        theme_idx = self.get_setting("theme", 0)
+        theme_name = list(THEMES.keys())[theme_idx]
+        color_hex = THEMES[theme_name].get(key, "#FFFFFF")
+        return Color.parseColor(color_hex)
+        
+    def _play_sound(self, tone_type: int):
+        if self.pg_tone_generator and tone_type != -1:
+            try:
+                self.pg_tone_generator.startTone(tone_type, 50)
+            except Exception as e:
+                log(f"[{__id__}] Sound error: {e}")
+
+    def _vibrate(self, duration_ms: int = 50):
+        if self.pg_vibrator:
+            try:
+                if Build.VERSION.SDK_INT >= 26:
+                    self.pg_vibrator.vibrate(VibrationEffect.createOneShot(duration_ms, VibrationEffect.DEFAULT_AMPLITUDE))
+                else:
+                    self.pg_vibrator.vibrate(duration_ms)
+            except Exception as e:
+                log(f"[{__id__}] Vibrate error: {e}")
+
+    def on_plugin_load(self):
+        if not self.AndroidUtilities:
+            log(f"[{__id__}] CRITICAL: AndroidUtilities class not found. Plugin disabled.")
+            return
+        self.add_menu_item(MenuItemData(
+            menu_type=MenuItemType.CHAT_ACTION_MENU,
+            text="💣 Сапёр",
+            icon="msg_game",
+            on_click=self._show_main_menu
+        ))
+
+        app_context = find_class("org.telegram.messenger.ApplicationLoader").applicationContext
+        if app_context:
+            try:
+                self.pg_tone_generator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100)
+                self.pg_vibrator = app_context.getSystemService(Context.VIBRATOR_SERVICE)
+            except Exception as e:
+                log(f"[{__id__}] Failed to initialize sound/vibration: {e}")
+        
+        # Attempt to load game state when plugin loads
+        self._load_game_state()
+
+    def on_plugin_unload(self):
+        self._exit_game()
+        self._save_game_state() # Save state on unload
+
+        if self.pg_tone_generator:
+            self.pg_tone_generator.release()
+            self.pg_tone_generator = None
+        self.pg_vibrator = None
+
+    def create_settings(self):
+        stats = self._load_stats()
+        
+        general_stats_text = f"Побед: {stats.get('wins', 0)}\nПоражений: {stats.get('losses', 0)}"
+
+        best_times_text_parts = []
+        for diff_idx, diff_config in DIFFICULTY_LEVELS.items():
+            if diff_idx == 3: # Пропускаем пользовательский уровень, чтобы он не отображался в фиксированных рекордах
+                 # Для пользовательского уровня можно отобразить отдельный рекорд
+                key_custom = f"{diff_idx}_{MODE_NORMAL}" # Пользовательский пока только в обычном режиме
+                best_time_custom = stats.get('best_times', {}).get(key_custom)
+                if best_time_custom is not None:
+                    best_times_text_parts.append(f"• Пользовательский (Обычный): {best_time_custom} сек.")
+                continue # Пропускаем дальше, чтобы не дублировать
+            
+            for mode_idx, mode_config in GAME_MODES.items():
+                key = f"{diff_idx}_{mode_idx}"
+                best_time = stats.get('best_times', {}).get(key)
+                if best_time is not None:
+                    best_times_text_parts.append(f"• {diff_config['name']} ({mode_config['name']}): {best_time} сек.")
+
+        if not best_times_text_parts:
+            best_times_text_parts.append("Нет рекордов пока.")
+        
+        # NEW: Achievements display
+        first_wins_achievements_text_parts = []
+        first_wins = stats.get('first_wins_achievements', {})
+        for diff_idx, diff_config in DIFFICULTY_LEVELS.items():
+            for mode_idx, mode_config in GAME_MODES.items():
+                key = f"{diff_idx}_{mode_idx}"
+                if first_wins.get(key, False):
+                    first_wins_achievements_text_parts.append(f"• {diff_config['name']} ({mode_config['name']})")
+        if not first_wins_achievements_text_parts:
+            first_wins_achievements_text_parts.append("Нет достижений пока.")
+
+
+        difficulty_items = [
+            f"{d['name']} ({d['width']}x{d['height']}, {d['mines']} мин)" 
+            for d in DIFFICULTY_LEVELS.values() if d['name'] != "Пользовательский"
+        ]
+        difficulty_items.append(DIFFICULTY_LEVELS[3]["name"]) # Пользовательский в конце
+
+        game_mode_items = [mode['name'] for mode in GAME_MODES.values()]
+
+        is_custom_difficulty_selected = self.get_setting("difficulty", 1) == 3
+
+        return [
+            Header(text="Настройки игры 'Сапёр'"),
+            Selector(
+                key="difficulty", 
+                text="Уровень сложности", 
+                items=difficulty_items,
+                default=1, 
+                icon="msg_stats_solar"
+            ),
+            Input(
+                key="custom_board_width",
+                text="Ширина поля",
+                default="10",
+                subtext="От 5 до 30 клеток. Только для 'Пользовательского' уровня."
+            ) if is_custom_difficulty_selected else None,
+            Input(
+                key="custom_board_height",
+                text="Высота поля",
+                default="10",
+                subtext="От 5 до 30 клеток. Только для 'Пользовательского' уровня."
+            ) if is_custom_difficulty_selected else None,
+            Input(
+                key="custom_board_mines",
+                text="Количество мин",
+                default="15",
+                subtext="От 1 до (ширина * высота - 9). Только для 'Пользовательского' уровня."
+            ) if is_custom_difficulty_selected else None,
+            Selector(
+                key="game_mode",
+                text="Режим игры",
+                items=game_mode_items,
+                default=MODE_NORMAL,
+                icon="msg_game_solar"
+            ),
+            Selector(
+                key="theme",
+                text="Тема оформления",
+                items=list(THEMES.keys()),
+                default=0,
+                icon="msg_palette_solar"
+            ),
+            Divider(),
+            Header(text="Настройки звука"),
+            Selector(
+                key="cell_reveal_sound",
+                text="Звук при открытии ячейки",
+                items=list(SOUND_OPTIONS.keys()),
+                default=1,
+                icon="msg_tone_on_solar"
+            ),
+            Selector(
+                key="cell_flag_sound",
+                text="Звук при установке/снятии флага",
+                items=list(SOUND_OPTIONS.keys()),
+                default=3,
+                icon="msg_tone_add_solar"
+            ),
+            Divider(),
+            Header(text="Статистика"),
+            Text(text=general_stats_text, icon="menu_feature_reactions_solar"),
+            Text(text="**Лучшие времена:**\n" + "\n".join(best_times_text_parts), icon="menu_premium_clock_solar"),
+            Text(text=f"Текущая серия побед: {stats.get('win_streak', 0)}", icon="msg_groups_solar"),
+            Text(text=f"Всего обезврежено мин: {stats.get('total_mines_cleared', 0)}", icon="msg_filled_storageusage_solar"),
+            Text(text="**Достижения 'Первая победа':**\n" + "\n".join(first_wins_achievements_text_parts), icon="msg_win_achievement"), # NEW achievement icon, assuming it exists
+            Text(text="Сбросить статистику", red=True, icon="msg_delete_solar", on_click=lambda v: self._confirm_reset_stats()),
+            Divider(text="#>^_^<#")
+        ]
+    
+    def _open_plugin_settings(self, context: dict):
+        if self.pg_dialog_menu and self.pg_dialog_menu.isShowing():
+            self.pg_dialog_menu.dismiss()
+        
+        def action():
+            try:
+                java_plugin = PluginsController.getInstance().plugins.get(self.id)
+                if java_plugin:
+                    last_fragment = get_last_fragment()
+                    if last_fragment:
+                        last_fragment.presentFragment(PluginSettingsActivity(java_plugin))
+            except Exception as e:
+                log(f"[{__id__}] Failed to open plugin settings: {e}")
+                run_on_ui_thread(lambda: BulletinHelper.show_error(f"Не удалось открыть настройки: {e}"))
+        run_on_ui_thread(action)
+
+    def _show_main_menu(self, context: dict):
+        self._exit_game()
+        try:
+            current_fragment = get_last_fragment()
+            if not current_fragment or not current_fragment.getParentActivity():
+                BulletinHelper.show_error("Не удалось получить контекст для запуска меню.")
+                return
+            self.activity = current_fragment.getParentActivity()
+
+            builder = AlertDialogBuilder(self.activity)
+            main_menu_layout = LinearLayout(self.activity)
+            main_menu_layout.setOrientation(LinearLayout.VERTICAL)
+            main_menu_layout.setGravity(Gravity.CENTER_HORIZONTAL)
+            main_menu_layout.setPadding(self.AndroidUtilities.dp(24), self.AndroidUtilities.dp(24), self.AndroidUtilities.dp(24), self.AndroidUtilities.dp(24))
+            
+            bg = GradientDrawable()
+            bg.setColor(self._get_color('header'))
+            bg.setCornerRadius(self.AndroidUtilities.dp(16))
+            main_menu_layout.setBackground(bg)
+
+            title_view = TextView(self.activity)
+            title_view.setText("💣 Сапёр 🏆")
+            title_view.setTextSize(24)
+            title_view.setTypeface(None, Typeface.BOLD)
+            title_view.setTextColor(self._get_color('text_timer'))
+            title_view.setGravity(Gravity.CENTER)
+            main_menu_layout.addView(title_view)
+
+            spacer = View(self.activity)
+            spacer.setLayoutParams(LinearLayout.LayoutParams(0, self.AndroidUtilities.dp(24)))
+            main_menu_layout.addView(spacer)
+            
+            difficulty_idx = self.get_setting("difficulty", 1)
+            difficulty_config = DIFFICULTY_LEVELS.get(difficulty_idx, DIFFICULTY_LEVELS[1])
+            difficulty_text = f"Сложность: {difficulty_config['name']}"
+            
+            if difficulty_idx == 3: # Пользовательский уровень
+                custom_width = self.get_setting("custom_board_width", "10")
+                custom_height = self.get_setting("custom_board_height", "10")
+                custom_mines = self.get_setting("custom_board_mines", "15")
+                difficulty_text += f" ({custom_width}x{custom_height}, {custom_mines} мин)"
+            else:
+                difficulty_text += f" ({difficulty_config['width']}x{difficulty_config['height']}, {difficulty_config['mines']} мин)"
+
+            game_mode_idx = self.get_setting("game_mode", MODE_NORMAL)
+            game_mode_name = GAME_MODES.get(game_mode_idx, GAME_MODES[MODE_NORMAL])["name"]
+            game_mode_text = f"Режим: {game_mode_name}"
+
+            difficulty_info_view = TextView(self.activity)
+            difficulty_info_view.setText(f"{difficulty_text}\n{game_mode_text}")
+            difficulty_info_view.setTextSize(14)
+            difficulty_info_view.setTextColor(self._get_color('text_hint'))
+            difficulty_info_view.setGravity(Gravity.CENTER)
+            main_menu_layout.addView(difficulty_info_view)
+
+            spacer_small = View(self.activity)
+            spacer_small.setLayoutParams(LinearLayout.LayoutParams(0, self.AndroidUtilities.dp(16)))
+            main_menu_layout.addView(spacer_small)
+
+            settings_btn = self._create_menu_button("Настройки игры", _ClickListener(lambda v: self._open_plugin_settings(context)))
+            main_menu_layout.addView(settings_btn)
+
+            spacer_med = View(self.activity)
+            spacer_med.setLayoutParams(LinearLayout.LayoutParams(0, self.AndroidUtilities.dp(16)))
+            main_menu_layout.addView(spacer_med)
+
+            rules_btn = self._create_menu_button("Правила игры", _ClickListener(lambda v: self._show_rules_dialog()))
+            main_menu_layout.addView(rules_btn)
+            
+            spacer2 = View(self.activity)
+            spacer2.setLayoutParams(LinearLayout.LayoutParams(0, self.AndroidUtilities.dp(16)))
+            main_menu_layout.addView(spacer2)
+
+            play_btn = self._create_menu_button("Играть", _ClickListener(lambda v: self._start_new_game_flow()))
+            main_menu_layout.addView(play_btn)
+
+            builder.set_view(main_menu_layout)
+            builder.set_cancelable(True)
+            builder.show()
+            self.pg_dialog_menu = builder.get_dialog()
+
+            window = self.pg_dialog_menu.getWindow()
+            if window:
+                window.setLayout(self.AndroidUtilities.dp(300), WindowManager.LayoutParams.WRAP_CONTENT)
+                window.setBackgroundDrawable(GradientDrawable())
+
+        except Exception:
+            full_traceback = traceback.format_exc()
+            log(f"[{__id__}] CRASH in _show_main_menu: {full_traceback}")
+            self._show_error_dialog_with_copy(full_traceback)
+
+    def _create_menu_button(self, text: str, on_click_listener: _ClickListener) -> Button:
+        button = Button(self.activity)
+        button.setText(text)
+        button.setTextColor(self._get_color('btn_text'))
+        button.setTextSize(16)
+        button.setTypeface(None, Typeface.BOLD)
+        
+        button_bg = GradientDrawable()
+        button_bg.setShape(GradientDrawable.RECTANGLE)
+        button_bg.setCornerRadius(self.AndroidUtilities.dp(8))
+        button_bg.setColor(self._get_color('btn_normal'))
+        button.setBackground(button_bg)
+        
+        params = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, self.AndroidUtilities.dp(50))
+        button.setLayoutParams(params)
+        button.setOnClickListener(on_click_listener)
+        
+        button.setOnTouchListener(_TouchListener(partial(self._handle_button_touch, button_bg, self._get_color('btn_normal'), self._get_color('btn_pressed'))))
+
+        return button
+
+    def _handle_button_touch(self, pg_bg_drawable: GradientDrawable, pg_normal_color: int, pg_pressed_color: int, view: View, event: Any) -> bool:
+        if event.getAction() == MotionEvent.ACTION_DOWN:
+            pg_bg_drawable.setColor(pg_pressed_color)
+        elif event.getAction() == MotionEvent.ACTION_UP or event.getAction() == MotionEvent.ACTION_CANCEL:
+            pg_bg_drawable.setColor(pg_normal_color)
+        return False
+
+    def _show_rules_dialog(self):
+        rules_text = (
+            "**Правила игры \"Сапёр\":**\n\n"
+            "Цель игры: Открыть все клетки игрового поля, не подорвавшись на мине.\n\n"
+            "**Игровой процесс:**\n"
+            "1.  **Начало игры:** Выберите уровень сложности и нажмите \"Играть\".\n"
+            "2.  **Клик (короткое нажатие):** Открывает выбранную клетку.\n"
+            "    *   Если клетка содержит мину - вы проиграли!\n"
+            "    *   Если клетка пуста (0 мин вокруг) - она и соседние пустые клетки откроются автоматически.\n"
+            "    *   Если клетка содержит число (от 1 до 8) - это число указывает, сколько мин находится в соседних 8 клетках.\n"
+            "3.  **Долгое нажатие:** Ставит или убирает флажок на выбранной клетке. (Недоступно в режиме 'Без флагов')\n"
+            "    *   Флажок используется для пометки клеток, где, по вашему мнению, находится мина.\n"
+            "    *   Количество оставшихся флажков (т.е. предполагаемых мин) отображается вверху экрана.\n"
+            "4.  **Аккорд (клик по открытому числу):** Если количество флажков вокруг открытой числовой клетки совпадает с её числом, все оставшиеся закрытые (но не помеченные флагом) соседние ячейки откроются автоматически.\n"
+            "5.  **Кнопки Отмены/Повтора (↩ / ↪):** Отменяют или повторяют ваш последний ход.\n"
+            "6.  **Кнопка Подсказки (❓):** Открывает одну гарантированно безопасную клетку. Использование подсказки отменяет сохранение лучшего времени для текущей игры.\n"
+            "7.  **Победа:** Вы выигрываете, когда все клетки без мин открыты.\n"
+            "8.  **Поражение:** Вы проигрываете, если открываете клетку с миной.\n\n"
+            "Удачи в игре! 💣"
+        )
+        
+        @run_on_ui_thread
+        def show_dialog():
+            builder = AlertDialogBuilder(self.activity)
+            builder.set_title("Правила игры \"Сапёр\"")
+            builder.set_message(rules_text)
+            
+            def on_copy_click(b: AlertDialogBuilder, w: int):
+                if self.AndroidUtilities and self.AndroidUtilities.addToClipboard(rules_text):
+                    BulletinHelper.show_copied_to_clipboard("Правила скопированы")
+                else:
+                    BulletinHelper.show_error("Не удалось скопировать правила")
+                b.dismiss()
+
+            builder.set_positive_button("Копировать правила", _ClickListener(on_copy_click))
+            builder.set_negative_button("Закрыть", _ClickListener(lambda v: builder.get_dialog().dismiss()))
+            builder.show()
+            self.pg_dialog_rules = builder.get_dialog()
+
+    def _start_new_game_flow(self):
+        if self.pg_dialog_menu and self.pg_dialog_menu.isShowing():
+            self.pg_dialog_menu.dismiss()
+
+        try:
+            self._stop_timer()
+            self.game_paused = False
+            self.game_time = 0
+            if not self.AndroidUtilities:
+                BulletinHelper.show_error("Ошибка инициализации плагина (AndroidUtilities не найден).")
+                return
+            
+            if not self.activity:
+                current_fragment = get_last_fragment()
+                if not current_fragment or not current_fragment.getParentActivity():
+                    BulletinHelper.show_error("Не удалось получить контекст для запуска игры.")
+                    return
+                self.activity = current_fragment.getParentActivity()
+
+            difficulty = self.get_setting("difficulty", 1)
+            config = DIFFICULTY_LEVELS.get(difficulty, DIFFICULTY_LEVELS[1]).copy() # Make a copy to avoid modifying original DIFFICULTY_LEVELS
+            
+            if difficulty == 3: # Пользовательский уровень
+                try:
+                    custom_width = int(self.get_setting("custom_board_width", "10"))
+                    custom_height = int(self.get_setting("custom_board_height", "10"))
+                    custom_mines = int(self.get_setting("custom_board_mines", "15"))
+
+                    min_dim, max_dim = 5, 30
+                    if not (min_dim <= custom_width <= max_dim and min_dim <= custom_height <= max_dim):
+                        raise ValueError(f"Ширина и высота должны быть от {min_dim} до {max_dim} клеток.")
+                    
+                    max_mines_possible = (custom_width * custom_height) - 9 # Ensure 3x3 safe zone on first click
+                    if max_mines_possible <= 0: # Handle very small boards where no safe zone is possible
+                         max_mines_possible = 1 # Allow at least one mine
+                    if not (1 <= custom_mines <= max_mines_possible):
+                        raise ValueError(f"Количество мин должно быть от 1 до {max_mines_possible} (для безопасной стартовой зоны).")
+                    
+                    config["name"] = "Пользовательский"
+                    config["width"] = custom_width
+                    config["height"] = custom_height
+                    config["mines"] = custom_mines
+                    BulletinHelper.show_info(f"Начинаем пользовательскую игру: {custom_width}x{custom_height}, {custom_mines} мин.")
+                except ValueError as ve:
+                    BulletinHelper.show_error(f"Ошибка пользовательских настроек: {ve}")
+                    self._show_main_menu(None)
+                    return
+
+            self.game_instance = MinesweeperGame(config["width"], config["height"], config["mines"])
+            self._create_game_dialog()
+            self._update_ui()
+
+            # --- Save initial state for Undo/Redo ---
+            self._save_game_state() # Save the freshly generated board state
+            run_on_ui_thread(self._update_undo_redo_buttons)
+
+        except Exception:
+            full_traceback = traceback.format_exc()
+            log(f"[{__id__}] CRASH in _start_new_game_flow: {full_traceback}")
+            self._show_error_dialog_with_copy(full_traceback)
+
+    def _toggle_pause_resume_from_status_button(self, view: View):
+        if self.game_instance.game_over or self.game_instance.is_first_click:
+            self._start_new_game_flow()
+        else:
+            self.game_paused = not self.game_paused
+            self._update_ui()
+
+    def _exit_game(self):
+        self._stop_timer()
+        self.game_paused = False
+        if self.pg_dialog_main and self.pg_dialog_main.isShowing():
+            self.pg_dialog_main.dismiss()
+        if self.pg_dialog_menu and self.pg_dialog_menu.isShowing():
+            self.pg_dialog_menu.dismiss()
+        if self.pg_dialog_rules and self.pg_dialog_rules.isShowing():
+            self.pg_dialog_rules.dismiss()
+            
+        self.pg_dialog_main = None
+        self.pg_dialog_menu = None
+        self.pg_dialog_rules = None
+        self.activity = None
+
+    def _show_error_dialog_with_copy(self, error_text: str):
+        fragment = get_last_fragment()
+        if not fragment or not fragment.getParentActivity():
+            run_on_ui_thread(lambda: BulletinHelper.show_error("Критическая ошибка. Лог в консоли."))
+            return
+        @run_on_ui_thread
+        def show_dialog():
+            activity = fragment.getParentActivity()
+            builder = AlertDialogBuilder(activity)
+            builder.set_title("Ошибка при запуске")
+            builder.set_message("Произошла критическая ошибка. Пожалуйста, скопируйте лог и отправьте его для исправления.")
+            
+            # Attempt to get the full traceback from the error_text if it's provided
+            error_log_text = error_text if error_text else traceback.format_exc()
+
+            def on_copy_click(b: AlertDialogBuilder, w: int):
+                if self.AndroidUtilities and self.AndroidUtilities.addToClipboard(error_log_text):
+                    BulletinHelper.show_copied_to_clipboard("Лог ошибки скопирован")
+                else:
+                    BulletinHelper.show_error("Не удалось скопировать лог")
+                b.dismiss()
+            
+            builder.set_positive_button("Копировать лог", _ClickListener(on_copy_click))
+            builder.set_negative_button("Закрыть", _ClickListener(lambda v: builder.get_dialog().dismiss()))
+            builder.show()
+    
+    def _create_game_dialog(self):
+        builder = AlertDialogBuilder(self.activity)
+        main_layout = LinearLayout(self.activity)
+        main_layout.setOrientation(LinearLayout.VERTICAL)
+        main_layout.setBackgroundColor(self._get_color('bg'))
+
+        header = self._create_header_layout()
+        main_layout.addView(header)
+
+        grid_container = LinearLayout(self.activity)
+        grid_container.setPadding(self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(8))
+        grid_container.setBackgroundColor(self._get_color('grid'))
+        grid_container.setGravity(Gravity.CENTER)
+        
+        self.grid_layout = GridLayout(self.activity)
+        self.grid_layout.setColumnCount(self.game_instance.width)
+        grid_container.addView(self.grid_layout)
+
+        h_scroll_view = HorizontalScrollView(self.activity)
+        h_scroll_view.addView(grid_container)
+        main_layout.addView(h_scroll_view)
+        
+        hint_view = self._create_hint_view()
+        main_layout.addView(hint_view)
+
+        self._populate_grid()
+
+        builder.set_view(main_layout)
+        builder.set_cancelable(True)
+        builder.show()
+        self.pg_dialog_main = builder.get_dialog()
+        
+        window = self.pg_dialog_main.getWindow()
+        if window:
+            window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT)
+
+    def _create_header_layout(self):
+        header_layout = LinearLayout(self.activity)
+        header_layout.setOrientation(LinearLayout.HORIZONTAL)
+        header_layout.setGravity(Gravity.CENTER_VERTICAL)
+        header_layout.setPadding(self.AndroidUtilities.dp(16), self.AndroidUtilities.dp(12), self.AndroidUtilities.dp(16), self.AndroidUtilities.dp(12))
+        header_layout.setBackgroundColor(self._get_color('header'))
+        
+        exit_btn = TextView(self.activity)
+        exit_btn.setText("✖")
+        exit_btn.setTextSize(20)
+        exit_btn.setTextColor(self._get_color('exit'))
+        exit_btn.setPadding(self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(4), self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(4))
+        exit_btn_bg = GradientDrawable()
+        exit_btn_bg.setCornerRadius(self.AndroidUtilities.dp(8))
+        exit_btn_bg.setColor(Color.TRANSPARENT)
+        exit_btn.setBackground(exit_btn_bg)
+        exit_btn.setOnClickListener(_ClickListener(lambda v: self._show_main_menu(None)))
+        exit_btn.setOnTouchListener(_TouchListener(partial(self._handle_button_touch, exit_btn_bg, Color.TRANSPARENT, Color.argb(50, Color.red(self._get_color('exit')), Color.green(self._get_color('exit')), Color.blue(self._get_color('exit'))))))
+        header_layout.addView(exit_btn)
+
+        undo_btn = TextView(self.activity)
+        undo_btn.setId(self.activity.getResources().getIdentifier("minesweeper_undo_btn", "id", self.activity.getPackageName()))
+        undo_btn.setText("↩")
+        undo_btn.setTextSize(20)
+        undo_btn.setTextColor(self._get_color('btn_text'))
+        undo_btn.setPadding(self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(4), self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(4))
+        undo_btn_bg = GradientDrawable()
+        undo_btn_bg.setCornerRadius(self.AndroidUtilities.dp(8))
+        undo_btn_bg.setColor(Color.TRANSPARENT)
+        undo_btn.setBackground(undo_btn_bg)
+        undo_btn.setOnClickListener(_ClickListener(lambda v: self._undo_last_move()))
+        undo_btn.setOnTouchListener(_TouchListener(partial(self._handle_button_touch, undo_btn_bg, Color.TRANSPARENT, Color.argb(50, Color.red(self._get_color('btn_text')), Color.green(self._get_color('btn_text')), Color.blue(self._get_color('btn_text'))))))
+        header_layout.addView(undo_btn)
+
+        redo_btn = TextView(self.activity)
+        redo_btn.setId(self.activity.getResources().getIdentifier("minesweeper_redo_btn", "id", self.activity.getPackageName()))
+        redo_btn.setText("↪")
+        redo_btn.setTextSize(20)
+        redo_btn.setTextColor(self._get_color('btn_text'))
+        redo_btn.setPadding(self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(4), self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(4))
+        redo_btn_bg = GradientDrawable()
+        redo_btn_bg.setCornerRadius(self.AndroidUtilities.dp(8))
+        redo_btn_bg.setColor(Color.TRANSPARENT)
+        redo_btn.setBackground(redo_btn_bg)
+        redo_btn.setOnClickListener(_ClickListener(lambda v: self._redo_last_move()))
+        redo_btn.setOnTouchListener(_TouchListener(partial(self._handle_button_touch, redo_btn_bg, Color.TRANSPARENT, Color.argb(50, Color.red(self._get_color('btn_text')), Color.green(self._get_color('btn_text')), Color.blue(self._get_color('btn_text'))))))
+        header_layout.addView(redo_btn)
+
+        self.flags_view = TextView(self.activity)
+        self.flags_view.setTypeface(None, Typeface.BOLD)
+        self.flags_view.setTextSize(18)
+        self.flags_view.setTextColor(self._get_color('text_flag'))
+        self.flags_view.setText(f"🚩 {self.game_instance.mines}")
+        header_layout.addView(self.flags_view)
+
+        spacer = View(self.activity)
+        spacer.setLayoutParams(LinearLayout.LayoutParams(0, 0, 1.0))
+        header_layout.addView(spacer)
+
+        # NEW: Hint button
+        hint_btn = TextView(self.activity)
+        hint_btn.setId(self.activity.getResources().getIdentifier("minesweeper_hint_btn", "id", self.activity.getPackageName()))
+        hint_btn.setText("❓")
+        hint_btn.setTextSize(24)
+        hint_btn.setGravity(Gravity.CENTER)
+        hint_btn.setPadding(self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(4), self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(4))
+        hint_btn_bg = GradientDrawable()
+        hint_btn_bg.setCornerRadius(self.AndroidUtilities.dp(8))
+        hint_btn_bg.setColor(Color.TRANSPARENT)
+        hint_btn.setBackground(hint_btn_bg)
+        hint_btn.setOnClickListener(_ClickListener(lambda v: self._use_hint()))
+        hint_btn.setOnTouchListener(_TouchListener(partial(self._handle_button_touch, hint_btn_bg, Color.TRANSPARENT, Color.argb(50, Color.red(self._get_color('text_hint')), Color.green(self._get_color('text_hint')), Color.blue(self._get_color('text_hint'))))))
+        header_layout.addView(hint_btn)
+
+
+        self.status_button_view = TextView(self.activity)
+        self.status_button_view.setTextSize(24)
+        self.status_button_view.setGravity(Gravity.CENTER)
+        self.status_button_view.setPadding(self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(4), self.AndroidUtilities.dp(8), self.AndroidUtilities.dp(4))
+        status_btn_bg = GradientDrawable()
+        status_btn_bg.setCornerRadius(self.AndroidUtilities.dp(8))
+        status_btn_bg.setColor(Color.TRANSPARENT)
+        self.status_button_view.setBackground(status_btn_bg)
+        self.status_button_view.setOnClickListener(_ClickListener(self._toggle_pause_resume_from_status_button))
+        self.status_button_view.setOnTouchListener(_TouchListener(partial(self._handle_button_touch, status_btn_bg, Color.TRANSPARENT, Color.argb(50, Color.red(self._get_color('text_timer')), Color.green(self._get_color('text_timer')), Color.blue(self._get_color('text_timer'))))))
+        header_layout.addView(self.status_button_view)
+
+        spacer2 = View(self.activity)
+        spacer2.setLayoutParams(LinearLayout.LayoutParams(0, 0, 1.0))
+        header_layout.addView(spacer2)
+
+        self.timer_view = TextView(self.activity)
+        self.timer_view.setTypeface(None, Typeface.BOLD)
+        self.timer_view.setTextSize(18)
+        self.timer_view.setTextColor(self._get_color('text_timer'))
+        self.timer_view.setText("⏱ 000")
+        header_layout.addView(self.timer_view)
+        
+        return header_layout
+        
+    def _create_hint_view(self):
+        game_mode_idx = self.get_setting("game_mode", MODE_NORMAL)
+        if game_mode_idx == MODE_NO_FLAGS:
+            hint_text_content = "Подсказка: Долгое нажатие на ячейку игнорируется (режим 'Без флагов'). Клик по открытому числу - аккорд."
+        else:
+            hint_text_content = "Подсказка: Долгое нажатие на ячейку ставит флаг. Клик по открытому числу - аккорд."
+
+        hint_text = TextView(self.activity)
+        hint_text.setText(hint_text_content)
+        hint_text.setTextSize(12)
+        hint_text.setTextColor(self._get_color('text_hint'))
+        hint_text.setGravity(Gravity.CENTER)
+        hint_text.setPadding(0, self.AndroidUtilities.dp(4), 0, self.AndroidUtilities.dp(8))
+        return hint_text
+
+    def _populate_grid(self):
+        self.grid_layout.removeAllViews() # Clear existing views
+        self.cell_buttons = [[None for _ in range(self.game_instance.width)] for _ in range(self.game_instance.height)]
+        cell_size = self.AndroidUtilities.dp(28)
+        margin = self.AndroidUtilities.dp(1)
+        for y in range(self.game_instance.height):
+            for x in range(self.game_instance.width):
+                button = Button(self.activity)
+                params = GridLayout.LayoutParams()
+                params.width = cell_size
+                params.height = cell_size
+                params.setMargins(margin, margin, margin, margin)
+                button.setLayoutParams(params)
+                button.setPadding(0,0,0,0)
+                
+                pg_cell_bg = GradientDrawable()
+                pg_cell_bg.setCornerRadius(self.AndroidUtilities.dp(4))
+                pg_cell_bg.setColor(self._get_color('cell_covered'))
+                button.setBackground(pg_cell_bg)
+
+                button.setOnClickListener(_ClickListener(partial(self._handle_cell_click, x, y)))
+                button.setOnLongClickListener(_LongClickListener(partial(self._handle_cell_long_click, x, y)))
+                button.setOnTouchListener(_TouchListener(partial(self._handle_cell_touch, pg_cell_bg, x, y)))
+
+                self.grid_layout.addView(button)
+                self.cell_buttons[y][x] = button
+
+    def _handle_cell_touch(self, pg_bg_drawable: GradientDrawable, x: int, y: int, view: View, event: Any) -> bool:
+        if self.game_instance.game_over or self.game_paused:
+            return False
+        
+        current_cell_state = self.game_instance.visible_board[y][x]
+        
+        if event.getAction() == MotionEvent.ACTION_DOWN:
+            if current_cell_state == STATE_COVERED:
+                pg_bg_drawable.setColor(self._get_color('cell_flash'))
+        elif event.getAction() == MotionEvent.ACTION_UP or event.getAction() == MotionEvent.ACTION_CANCEL:
+            if current_cell_state == STATE_COVERED:
+                pg_bg_drawable.setColor(self._get_color('cell_covered')) 
+        return False
+
+
+    def _animate_cell_reveal(self, x: int, y: int):
+        button = self.cell_buttons[y][x]
+        if not button: return
+
+        pg_bg_drawable = button.getBackground()
+        if not isinstance(pg_bg_drawable, GradientDrawable): return
+
+        original_color = self._get_color('cell_revealed')
+        flash_color = self._get_color('cell_flash')
+
+        pg_bg_drawable.setColor(flash_color)
+        run_on_ui_thread(lambda: pg_bg_drawable.setColor(original_color), delay=100)
+
+    def _handle_cell_click(self, x: int, y: int, view: View):
+        if self.game_instance.game_over or self.game_paused: return
+        
+        self._save_game_state()
+
+        if self.game_instance.is_first_click: 
+            self._start_timer()
+            
+        current_state = self.game_instance.visible_board[y][x]
+        
+        if current_state == STATE_FLAGGED:
+            self._play_sound(ToneGenerator.TONE_CDMA_SOFT_ERROR_LITE) 
+            return
+
+        elif current_state == STATE_REVEALED and self.game_instance.board[y][x] > 0:
+            pg_mine_hit_by_chord = self.game_instance.perform_chord_action(x, y)
+            
+            if pg_mine_hit_by_chord:
+                self._play_sound(ToneGenerator.TONE_PROP_NACK)
+                self._vibrate(150)
+            elif self.game_instance.game_won:
+                self._play_sound(ToneGenerator.TONE_PROP_KNOB_ACK)
+                self._vibrate(100)
+            else:
+                pg_tone_type_key_index = self.get_setting("cell_reveal_sound", 1)
+                pg_tone_type = list(SOUND_OPTIONS.values())[pg_tone_type_key_index]
+                if pg_tone_type != -1:
+                    self._play_sound(pg_tone_type)
+
+            self._update_ui()
+            if self.game_instance.game_over: self._end_game()
+            return
+
+        self.game_instance.reveal(x, y)
+        self._animate_cell_reveal(x, y)
+
+        if self.game_instance.board[y][x] == -1:
+            self._play_sound(ToneGenerator.TONE_PROP_NACK)
+            self._vibrate(150)
+        else:
+            pg_tone_type_key_index = self.get_setting("cell_reveal_sound", 1)
+            pg_tone_type = list(SOUND_OPTIONS.values())[pg_tone_type_key_index]
+            if pg_tone_type != -1:
+                self._play_sound(pg_tone_type)
+        
+        self._update_ui()
+        if self.game_instance.game_over: self._end_game()
+
+    def _handle_cell_long_click(self, x: int, y: int, view: View) -> bool:
+        if self.game_instance.game_over or self.game_paused: return True
+        
+        game_mode_idx = self.get_setting("game_mode", MODE_NORMAL)
+        if game_mode_idx == MODE_NO_FLAGS:
+            BulletinHelper.show_info("Режим 'Без флагов' активен. Установка флагов недоступна.")
+            return True
+
+        self._save_game_state()
+
+        self.game_instance.toggle_flag(x, y)
+        pg_tone_type_key_index = self.get_setting("cell_flag_sound", 3)
+        pg_tone_type = list(SOUND_OPTIONS.values())[pg_tone_type_key_index]
+        if pg_tone_type != -1:
+            self._play_sound(pg_tone_type)
+        self._update_ui()
+        return True
+
+    def _use_hint(self):
+        if not self.game_instance or self.game_instance.game_over or self.game_paused: return
+        
+        # --- NEW: Set hint used flag ---
+        self.game_instance.hint_used_in_current_game = True
+        BulletinHelper.show_info("Подсказка использована. Лучшее время не будет сохранено.")
+
+        safe_covered_cells = []
+        for r in range(self.game_instance.height):
+            for c in range(self.game_instance.width):
+                if self.game_instance.visible_board[r][c] == STATE_COVERED and \
+                   (r, c) not in self.game_instance.mines_locations:
+                    safe_covered_cells.append((r, c))
+        
+        if not safe_covered_cells:
+            BulletinHelper.show_error("Нет доступных безопасных клеток для подсказки.")
+            self._update_ui() # Re-enable buttons if disabled by mistake
+            return
+
+        # Pick a random safe cell
+        ry, rx = random.choice(safe_covered_cells)
+        
+        # Trigger the click logic for the chosen cell
+        self._handle_cell_click(rx, ry, None)
+        self._update_ui() # Ensure UI is updated
+
+    def _update_ui(self):
+        if not self.activity or not self.game_instance: return
+        
+        game_mode_idx = self.get_setting("game_mode", MODE_NORMAL)
+
+        if game_mode_idx == MODE_NO_FLAGS:
+            self.flags_view.setText("🚫")
+        else:
+            flags_left = self.game_instance.mines - self.game_instance.flags_count
+            self.flags_view.setText(f"🚩 {flags_left}")
+        
+        if self.game_instance.game_won:
+            self.status_button_view.setText("🥳")
+        elif self.game_instance.game_over:
+            self.status_button_view.setText("😵")
+        elif self.game_paused:
+            self.status_button_view.setText("⏸️")
+        elif self.game_instance.is_first_click:
+            self.status_button_view.setText("🙂")
+        else:
+            self.status_button_view.setText("▶️")
+
+        for y in range(self.game_instance.height):
+            for x in range(self.game_instance.width):
+                button = self.cell_buttons[y][x]
+                state = self.game_instance.visible_board[y][x]
+                value = self.game_instance.board[y][x]
+                
+                pg_cell_bg = button.getBackground()
+                if isinstance(pg_cell_bg, GradientDrawable):
+                    if state == STATE_REVEALED:
+                        pg_cell_bg.setColor(self._get_color('cell_revealed'))
+                    elif state == STATE_FLAGGED:
+                        pg_cell_bg.setColor(self._get_color('cell_covered'))
+                    else: # STATE_COVERED
+                        pg_cell_bg.setColor(self._get_color('cell_covered'))
+                
+                button.setTextSize(12)
+                button.setTypeface(None, Typeface.BOLD)
+                if state == STATE_REVEALED:
+                    if value == -1:
+                        button.setText("💣")
+                        if isinstance(pg_cell_bg, GradientDrawable):
+                            pg_cell_bg.setColor(self._get_color('bomb'))
+                    elif value > 0:
+                        button.setText(str(value))
+                        button.setTextColor(self._get_color_for_number(value))
+                    else:
+                        button.setText("")
+                elif state == STATE_FLAGGED:
+                    button.setText("🚩")
+                    button.setTextSize(14)
+                else: # STATE_COVERED
+                    button.setText("")
+                
+                is_clickable = not self.game_instance.game_over and not self.game_paused
+                button.setClickable(is_clickable)
+                button.setLongClickable(is_clickable)
+        
+        run_on_ui_thread(self._update_undo_redo_buttons) # Ensure these are always updated
+        self._update_hint_button_state() # NEW: Update hint button state
+
+    def _update_hint_button_state(self):
+        if not self.pg_dialog_main or not self.activity or not self.game_instance: return
+
+        res = self.activity.getResources()
+        package_name = self.activity.getPackageName()
+        hint_btn_id = res.getIdentifier("minesweeper_hint_btn", "id", package_name)
+        hint_btn_view = self.pg_dialog_main.findViewById(hint_btn_id)
+
+        if hint_btn_view:
+            can_use_hint = not self.game_instance.game_over and \
+                           not self.game_paused and \
+                           any(self.game_instance.visible_board[r][c] == STATE_COVERED and \
+                               (r, c) not in self.game_instance.mines_locations
+                               for r in range(self.game_instance.height)
+                               for c in range(self.game_instance.width))
+            hint_btn_view.setEnabled(can_use_hint)
+            hint_btn_view.setAlpha(1.0 if can_use_hint else 0.3)
+
+
+    def _end_game(self):
+        self._stop_timer()
+        self.game_paused = False
+        stats = self._load_stats()
+        
+        current_difficulty_idx = self.get_setting("difficulty", 1)
+        current_game_mode_idx = self.get_setting("game_mode", MODE_NORMAL)
+        stats_key = f"{current_difficulty_idx}_{current_game_mode_idx}"
+
+        if self.game_instance.game_won:
+            stats['wins'] = stats.get('wins', 0) + 1
+            self._play_sound(ToneGenerator.TONE_PROP_KNOB_ACK)
+            self._vibrate(100)
+            
+            # --- NEW: Обновление лучших времен (с учетом подсказок) ---
+            if not self.game_instance.hint_used_in_current_game: # Only save best time if no hint was used
+                best_times = stats.get('best_times', {})
+                current_best_time = best_times.get(stats_key)
+                if current_best_time is None or self.game_time < current_best_time:
+                    best_times[stats_key] = self.game_time
+                    stats['best_times'] = best_times
+                run_on_ui_thread(lambda: BulletinHelper.show_success("Новый рекорд!"))
+            else:
+                run_on_ui_thread(lambda: BulletinHelper.show_info("Лучшее время не сохранено (использована подсказка)."))
+
+            stats['win_streak'] = stats.get('win_streak', 0) + 1
+            stats['total_mines_cleared'] = stats.get('total_mines_cleared', 0) + self.game_instance.mines
+            
+            first_wins_achievements = stats.get('first_wins_achievements', {})
+            if not first_wins_achievements.get(stats_key, False):
+                first_wins_achievements[stats_key] = True
+                stats['first_wins_achievements'] = first_wins_achievements
+                run_on_ui_thread(lambda: BulletinHelper.show_success(f"Поздравляем с первой победой на уровне '{DIFFICULTY_LEVELS[current_difficulty_idx]['name']}' в режиме '{GAME_MODES[current_game_mode_idx]['name']}'!"))
+
+        else:
+            stats['losses'] = stats.get('losses', 0) + 1
+            stats['win_streak'] = 0
+            for r, c in self.game_instance.mines_locations:
+                if self.game_instance.visible_board[r][c] != STATE_REVEALED:
+                    self.game_instance.visible_board[r][c] = STATE_REVEALED 
+            self._play_sound(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD)
+            self._vibrate(200)
+
+        self._save_stats(stats)
+        self._update_ui()
+        self._show_end_game_dialog(self.game_instance.game_won)
+    
+    @run_on_ui_thread
+    def _show_end_game_dialog(self, won: bool):
+        if not self.activity: return
+        
+        end_game_builder = AlertDialogBuilder(self.activity)
+        end_game_builder.set_cancelable(False)
+
+        layout = LinearLayout(self.activity)
+        layout.setOrientation(LinearLayout.VERTICAL)
+        layout.setGravity(Gravity.CENTER_HORIZONTAL)
+        layout.setPadding(self.AndroidUtilities.dp(24), self.AndroidUtilities.dp(24), self.AndroidUtilities.dp(24), self.AndroidUtilities.dp(24))
+        
+        bg = GradientDrawable()
+        bg.setColor(self._get_color('header'))
+        bg.setCornerRadius(self.AndroidUtilities.dp(16))
+        layout.setBackground(bg)
+
+        title_view = TextView(self.activity)
+        title_view.setText(f"🏆 ПОБЕДА! 🏆" if won else f"💀 ПОРАЖЕНИЕ 💀")
+        title_view.setTextSize(24)
+        title_view.setTypeface(None, Typeface.BOLD)
+        title_view.setTextColor(self._get_color('win') if won else self._get_color('bomb'))
+        title_view.setGravity(Gravity.CENTER)
+        layout.addView(title_view)
+
+        difficulty_idx = self.get_setting("difficulty", 1)
+        difficulty_name = DIFFICULTY_LEVELS[difficulty_idx]["name"]
+        game_mode_idx = self.get_setting("game_mode", MODE_NORMAL)
+        game_mode_name = GAME_MODES[game_mode_idx]["name"]
+
+        stats_view = TextView(self.activity)
+        stats_text = f"Уровень: {difficulty_name}\nРежим: {game_mode_name}\nВремя: {self.game_time} сек."
+        stats_view.setText(stats_text)
+        stats_view.setTextSize(16)
+        stats_view.setTextColor(Color.WHITE)
+        stats_view.setGravity(Gravity.CENTER)
+        params = LinearLayout.LayoutParams(-2, -2)
+        params.topMargin = self.AndroidUtilities.dp(16)
+        params.bottomMargin = self.AndroidUtilities.dp(24)
+        stats_view.setLayoutParams(params)
+        layout.addView(stats_view)
+
+        buttons_layout = LinearLayout(self.activity)
+        buttons_layout.setOrientation(LinearLayout.HORIZONTAL)
+        
+        pg_end_game_dialog = end_game_builder.create()
+
+        def on_new_game(v: View):
+            pg_end_game_dialog.dismiss()
+            self._start_new_game_flow()
+        
+        def on_exit(v: View):
+            pg_end_game_dialog.dismiss()
+            self._exit_game()
+            
+        btn_new_game = self._create_end_game_button("Новая игра", self._get_color('win'), _ClickListener(on_new_game))
+        btn_exit = self._create_end_game_button("Выход", self._get_color('bomb'), _ClickListener(on_exit))
+        
+        buttons_layout.addView(btn_exit)
+        spacer = View(self.activity)
+        spacer.setLayoutParams(LinearLayout.LayoutParams(self.AndroidUtilities.dp(16), 0))
+        buttons_layout.addView(spacer)
+        buttons_layout.addView(btn_new_game)
+        
+        layout.addView(buttons_layout)
+
+        end_game_builder.set_view(layout)
+        pg_end_game_dialog.show()
+        
+        window = pg_end_game_dialog.getWindow()
+        if window:
+            window.setLayout(self.AndroidUtilities.dp(300), WindowManager.LayoutParams.WRAP_CONTENT)
+            window.setBackgroundDrawable(GradientDrawable())
+
+    def _create_end_game_button(self, text: str, color: int, on_click: _ClickListener) -> Button:
+        button = Button(self.activity)
+        button.setText(text)
+        button.setTextColor(self._get_color('btn_text'))
+        button.setTypeface(None, Typeface.BOLD)
+        
+        bg = GradientDrawable()
+        bg.setColor(color)
+        bg.setCornerRadius(self.AndroidUtilities.dp(8))
+        button.setBackground(bg)
+        
+        params = LinearLayout.LayoutParams(0, -2, 1.0)
+        button.setLayoutParams(params)
+        button.setOnClickListener(on_click)
+        
+        button.setOnTouchListener(_TouchListener(partial(self._handle_button_touch, bg, color, Color.argb(100, Color.red(color), Color.green(color), Color.blue(color)))))
+        return button
+
+    def _timer_loop(self):
+        while not self.timer_stop_event.is_set():
+            time.sleep(1)
+            if self.timer_stop_event.is_set(): break
+            if not self.game_paused:
+                self.game_time += 1
+                if self.timer_view:
+                    run_on_ui_thread(lambda: self.timer_view.setText(f"⏱ {self.game_time:03d}"))
+
+    def _start_timer(self):
+        if self.pg_game_thread and self.pg_game_thread.is_alive():
+            self.game_paused = False
+            return
+
+        self.timer_stop_event.clear()
+        self.game_paused = False
+        self.pg_game_thread = threading.Thread(target=self._timer_loop, daemon=True)
+        self.pg_game_thread.start()
+    
+    def _stop_timer(self):
+        self.timer_stop_event.set()
+        if self.pg_game_thread and self.pg_game_thread.is_alive():
+            self.pg_game_thread.join(timeout=0.5)
+        self.pg_game_thread = None
+
+    def _get_color_for_number(self, num: int) -> int:
+        colors = {
+            1: "#3498DB", 2: "#2ECC71", 3: "#E74C3C", 4: "#9B59B6",
+            5: "#F1C40F", 6: "#1ABC9C", 7: "#E67E22", 8: "#34495E"
+        }
+        return Color.parseColor(colors.get(num, "#FFFFFF"))
+
+    def _load_stats(self) -> dict:
+        try:
+            return json.loads(self.get_setting("stats", "{}"))
+        except:
+            return {}
+
+    def _save_stats(self, stats: dict):
+        self.set_setting("stats", json.dumps(stats))
+        
+    def _confirm_reset_stats(self):
+        fragment = get_last_fragment()
+        if not fragment or not fragment.getParentActivity(): return
+        builder = AlertDialogBuilder(fragment.getParentActivity())
+        builder.set_title("Сброс статистики")
+        builder.set_message("Вы уверены, что хотите сбросить всю статистику?")
+        builder.set_positive_button("Да", _ClickListener(lambda v: self._reset_stats(builder.get_dialog())))
+        builder.set_negative_button("Отмена", _ClickListener(lambda v: builder.get_dialog().dismiss()))
+        builder.show()
+
+    def _reset_stats(self, dialog_to_dismiss: Any):
+        self.set_setting("stats", "{}")
+        dialog_to_dismiss.dismiss()
+        BulletinHelper.show_success("Статистика сброшена.")
+        fragment = get_last_fragment()
+        if fragment and hasattr(fragment, "rebuildAllFragments"):
+            run_on_ui_thread(lambda: fragment.rebuildAllFragments(True))
+            
+    # --- NEW: Undo/Redo Methods ---
+    def _save_game_state(self):
+        if not self.game_instance or self.game_instance.game_over:
+            return
+
+        if self.game_instance.history_index < len(self.game_instance.history) - 1:
+            self.game_instance.history = self.game_instance.history[:self.game_instance.history_index + 1]
+
+        state = GameState(self.game_instance, self)
+        self.game_instance.history.append(state)
+        self.game_instance.history_index = len(self.game_instance.history) - 1
+        # log(f"[{__id__}] State saved. History size: {len(self.game_instance.history)}, index: {self.game_instance.history_index}")
+        run_on_ui_thread(self._update_undo_redo_buttons)
+
+    def _undo_last_move(self):
+        if not self.game_instance or self.game_instance.history_index <= 0:
+            return
+        
+        self.game_instance.history_index -= 1
+        state_to_restore = self.game_instance.history[self.game_instance.history_index]
+        state_to_restore.apply_to(self.game_instance, self)
+        
+        if self.game_instance.game_over:
+            self._stop_timer()
+        elif not self.game_instance.is_first_click and not self.game_paused:
+            self._start_timer()
+        else:
+            self._stop_timer()
+
+        run_on_ui_thread(self._update_ui)
+        run_on_ui_thread(self._update_undo_redo_buttons)
+        # log(f"[{__id__}] Undo. History index: {self.game_instance.history_index}")
+
+    def _redo_last_move(self):
+        if not self.game_instance or self.game_instance.history_index >= len(self.game_instance.history) - 1:
+            return
+
+        self.game_instance.history_index += 1
+        state_to_restore = self.game_instance.history[self.game_instance.history_index]
+        state_to_restore.apply_to(self.game_instance, self)
+
+        if self.game_instance.game_over:
+            self._stop_timer()
+        elif not self.game_instance.is_first_click and not self.game_paused:
+            self._start_timer()
+        else:
+            self._stop_timer()
+
+        run_on_ui_thread(self._update_ui)
+        run_on_ui_thread(self._update_undo_redo_buttons)
+        # log(f"[{__id__}] Redo. History index: {self.game_instance.history_index}")
+
+    def _update_undo_redo_buttons(self):
+        if not self.pg_dialog_main or not self.activity or not self.game_instance: return
+
+        res = self.activity.getResources()
+        package_name = self.activity.getPackageName()
+
+        undo_btn_id = res.getIdentifier("minesweeper_undo_btn", "id", package_name)
+        redo_btn_id = res.getIdentifier("minesweeper_redo_btn", "id", package_name)
+
+        undo_btn_view = self.pg_dialog_main.findViewById(undo_btn_id)
+        redo_btn_view = self.pg_dialog_main.findViewById(redo_btn_id)
+
+        if undo_btn_view:
+            can_undo = self.game_instance.history_index > 0
+            undo_btn_view.setEnabled(can_undo)
+            undo_btn_view.setAlpha(1.0 if can_undo else 0.3)
+        
+        if redo_btn_view:
+            can_redo = self.game_instance.history_index < len(self.game_instance.history) - 1
+            redo_btn_view.setEnabled(can_redo)
+            redo_btn_view.setAlpha(1.0 if can_redo else 0.3)
+
+    # --- NEW: Save/Load game state ---
+    def _save_game_state(self):
+        if not self.game_instance:
+            self.set_setting("last_game_state", "null")
+            return
+
+        try:
+            state_data = {
+                "game": {
+                    "width": self.game_instance.width,
+                    "height": self.game_instance.height,
+                    "player_turn": self.game_instance.player_turn,
+                    "ai_level": self.game_instance.ai_level,
+                    "history": [move for move in self.game_instance.move_history], # Save raw moves
+                    "current_move_index": self.game_instance.current_move_index
+                },
+                "state": {
+                    "board": self.game_instance.board,
+                    "visible_board": self.game_instance.visible_board,
+                    "mines_locations": list(self.game_instance.mines_locations),
+                    "flags_count": self.game_instance.flags_count,
+                    "is_first_click": self.game_instance.is_first_click,
+                    "game_over": self.game_instance.game_over,
+                    "game_won": self.game_instance.game_won,
+                    "hint_used_in_current_game": self.game_instance.hint_used_in_current_game,
+                    "game_time": self.game_time,
+                    "game_paused": self.game_paused,
+                }
+            }
+            self.set_setting("last_game_state", json.dumps(state_data))
+            # log(f"Game state saved. History size: {len(self.game_instance.history)}, index: {self.game_instance.history_index}")
+        except Exception as e:
+            log(f"[{__id__}] Error saving game state: {e}\n{traceback.format_exc()}")
+
+    def _load_game_state(self):
+        try:
+            state_data_json = self.get_setting("last_game_state", "null")
+            if state_data_json and state_data_json != "null":
+                state_data = json.loads(state_data_json)
+                if state_data and "game" in state_data and "state" in state_data:
+                    
+                    game_config = state_data["game"]
+                    # Recreate MinesweeperGame instance with correct dimensions and mines
+                    self.game_instance = MinesweeperGame(width=game_config["width"], height=game_config["height"], mines=game_config["mines"])
+                    
+                    # Restore core game attributes from game_config
+                    self.game_instance.player_turn = game_config["player_turn"]
+                    self.game_instance.ai_level = game_config["ai_level"]
+                    self.game_instance.move_history = game_config["history"]
+                    self.game_instance.current_move_index = game_config["current_move_index"]
+                    
+                    # Restore state attributes from saved_state
+                    saved_state = state_data["state"]
+                    self.game_instance.board = saved_state["board"]
+                    self.game_instance.visible_board = saved_state["visible_board"]
+                    self.game_instance.mines_locations = set(saved_state["mines_locations"])
+                    self.game_instance.flags_count = saved_state["flags_count"]
+                    self.game_instance.is_first_click = saved_state["is_first_click"]
+                    self.game_instance.game_over = saved_state["game_over"]
+                    self.game_instance.game_won = saved_state["game_won"]
+                    self.game_instance.hint_used_in_current_game = saved_state["hint_used_in_current_game"]
+
+                    self.game_time = saved_state["game_time"]
+                    self.game_paused = saved_state["game_paused"]
+                    
+                    # Recreate history states properly
+                    self.game_instance.history = []
+                    for hist_data in game_config["history"]:
+                        # Need a temporary game instance to create GameState correctly
+                        temp_game_for_hist = MinesweeperGame(width=game_config["width"], height=game_config["height"], mines=game_config["mines"])
+                        hist_state = GameState(temp_game_for_hist, self)
+                        hist_state.__dict__.update(hist_data) # Load data into the state object
+                        self.game_instance.history.append(hist_state)
+
+                    # Apply loaded state immediately
+                    self.game_instance.apply_to(self.game_instance, self)
+
+                    if not self.game_instance.game_over and not self.game_instance.is_first_click and not self.game_paused:
+                        self._start_timer()
+                    
+                    run_on_ui_thread(self._update_undo_redo_buttons)
+                    run_on_ui_thread(self._update_ui)
+                    BulletinHelper.show_info("Состояние игры восстановлено.")
+                else:
+                    log("Invalid game state data format, starting fresh game.")
+                    BulletinHelper.show_error("Неверный формат сохраненных данных игры.")
+            else:
+                log("No saved game state found.")
+        except Exception as e:
+            log(f"[{__id__}] Error loading game state: {e}\n{traceback.format_exc()}")
+            # Try to provide the error log for copying even if loading fails
+            self._show_error_dialog_with_copy(f"Error loading game state: {e}\n{traceback.format_exc()}")
+
+    def _undo_last_move(self):
+        if not self.game_instance or self.game_instance.history_index <= 0:
+            return
+        
+        self.game_instance.history_index -= 1
+        state_to_restore = self.game_instance.history[self.game_instance.history_index]
+        state_to_restore.apply_to(self.game_instance, self)
+        
+        if self.game_instance.game_over:
+            self._stop_timer()
+        elif not self.game_instance.is_first_click and not self.game_paused:
+            self._start_timer()
+        else:
+            self._stop_timer()
+
+        run_on_ui_thread(self._update_ui)
+        run_on_ui_thread(self._update_undo_redo_buttons)
+        # log(f"[{__id__}] Undo. History index: {self.game_instance.history_index}")
+
+    def _redo_last_move(self):
+        if not self.game_instance or self.game_instance.history_index >= len(self.game_instance.history) - 1:
+            return
+
+        self.game_instance.history_index += 1
+        state_to_restore = self.game_instance.history[self.game_instance.history_index]
+        state_to_restore.apply_to(self.game_instance, self)
+
+        if self.game_instance.game_over:
+            self._stop_timer()
+        elif not self.game_instance.is_first_click and not self.game_paused:
+            self._start_timer()
+        else:
+            self._stop_timer()
+
+        run_on_ui_thread(self._update_ui)
+        run_on_ui_thread(self._update_undo_redo_buttons)
+        # log(f"[{__id__}] Redo. History index: {self.game_instance.history_index}")
+
+    def _update_undo_redo_buttons(self):
+        if not self.pg_dialog_main or not self.activity or not self.game_instance: return
+
+        res = self.activity.getResources()
+        package_name = self.activity.getPackageName()
+
+        undo_btn_id = res.getIdentifier("minesweeper_undo_btn", "id", package_name)
+        redo_btn_id = res.getIdentifier("minesweeper_redo_btn", "id", package_name)
+
+        undo_btn_view = self.pg_dialog_main.findViewById(undo_btn_id)
+        redo_btn_view = self.pg_dialog_main.findViewById(redo_btn_id)
+
+        if undo_btn_view:
+            can_undo = self.game_instance.history_index > 0
+            undo_btn_view.setEnabled(can_undo)
+            undo_btn_view.setAlpha(1.0 if can_undo else 0.3)
+        
+        if redo_btn_view:
+            can_redo = self.game_instance.history_index < len(self.game_instance.history) - 1
+            redo_btn_view.setEnabled(can_redo)
+            redo_btn_view.setAlpha(1.0 if can_redo else 0.3)
